@@ -42,14 +42,13 @@ uint16_t IP_GenerateHeader(void *packet, IP_Protocol_t protocol, const IP_Addres
 	IP_Header->FlagsFragment	= IP_FLAGS_DONTFRAGMENT;
 	IP_Header->TTL			= DEFAULT_TTL;
 	IP_Header->Protocol		= protocol;
-	IP_Header->DestinationAddress	= *destinationIP;
+	IP_Header->HeaderChecksum	= 0;		// First set it to 0, later calculate correct checksum
 	IP_Header->SourceAddress	= OwnIPAddress;
-	IP_Header->HeaderChecksum	= 0;
+	IP_Header->DestinationAddress	= *destinationIP;
 	IP_Header->HeaderChecksum	= Ethernet_Checksum(IP_Header, sizeof(IP_Header_t));
 
-	const IP_Address_t *destinationRouter = &IP_Header->DestinationAddress;
-	if(!IP_compareNet(&OwnIPAddress, destinationRouter))
-		destinationRouter = &RouterIPAddress;
+	if(!IP_compareNet(&OwnIPAddress, destinationIP))
+		destinationIP = &RouterIPAddress;
 
-	return Ethernet_GenerateHeaderIP(packet, destinationRouter, ETHERTYPE_IPV4, sizeof(IP_Header_t) + payloadLength);
+	return Ethernet_GenerateHeaderIP(packet, destinationIP, ETHERTYPE_IPV4, sizeof(IP_Header_t) + payloadLength);
 }

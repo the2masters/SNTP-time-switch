@@ -42,12 +42,12 @@ static uint16_t ARP_GeneratePacket(void *packet, ARP_Operation_t direction, cons
 	ARP_Packet->HLEN		= sizeof(MAC_Address_t);
 	ARP_Packet->PLEN		= sizeof(IP_Address_t);
 	ARP_Packet->Operation		= direction;
-	ARP_Packet->TargetMAC		= *targetMAC;	// Has to be placed before SenderMAC
-	ARP_Packet->TargetIP		= *targetIP;	// Has to be placed before SenderIP
 	ARP_Packet->SenderMAC		= OwnMACAddress;
 	ARP_Packet->SenderIP		= OwnIPAddress;
+	ARP_Packet->TargetMAC		= *targetMAC;
+	ARP_Packet->TargetIP		= *targetIP;
 
-	return Ethernet_GenerateHeader(packet, &ARP_Packet->TargetMAC, ETHERTYPE_ARP, sizeof(ARP_Packet_t));
+	return Ethernet_GenerateHeader(packet, targetMAC, ETHERTYPE_ARP, sizeof(ARP_Packet_t));
 }
 
 uint16_t ARP_ProcessPacket(void *packet, uint16_t length)
@@ -61,7 +61,11 @@ uint16_t ARP_ProcessPacket(void *packet, uint16_t length)
 	{
 		case ARP_OPERATION_REQUEST:
 			if(ARP_Packet->TargetIP != OwnIPAddress) break;
-			return ARP_GeneratePacket(packet, ARP_OPERATION_REPLY, &ARP_Packet->SenderMAC, &ARP_Packet->SenderIP);
+
+			// Get destination MAC and IP and recreate ARP Header
+			MAC_Address_t destinationMAC = ARP_Packet->SenderMAC;
+			IP_Address_t destinationIP = ARP_Packet->SenderIP;
+			return ARP_GeneratePacket(packet, ARP_OPERATION_REPLY, &destinationMAC, &destinationIP);
 
 		case ARP_OPERATION_REPLY:
 			if(!IP_compareNet(&OwnIPAddress, &ARP_Packet->SenderIP)) break;
