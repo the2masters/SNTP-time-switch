@@ -1,7 +1,7 @@
 #include "resources.h"
 #include "Descriptors.h"
 
-#define RemoteMAC L"001122334455"
+#define RemoteMAC L"020000000004"
 
 const USB_Descriptor_String_t PROGMEM LanguageString = USB_STRING_DESCRIPTOR_ARRAY(LANGUAGE_ID_ENG);
 const USB_Descriptor_String_t PROGMEM ManufacturerString = USB_STRING_DESCRIPTOR(L"the2masters");

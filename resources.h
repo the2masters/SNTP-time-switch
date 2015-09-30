@@ -5,12 +5,12 @@
 #include <time.h>
 
 #define CIDR		24
-#define IP_OWN		10, 0, 0, 2
-#define IP_ROUTER	10, 0, 0, 1
-#define IP_SNTP		10, 0, 0, 1
-#define MAC_OWN		0x66, 0x55, 0x44, 0x33, 0x22, 0x11
+#define IP_OWN		192, 168, 200, 40
+#define IP_ROUTER	192, 168, 200, 3
+#define IP_SNTP		192, 168, 201, 1
+#define MAC_OWN		0x02, 0x00, 0x00, 0x00, 0x00, 0x40
 
-#define ETHERNET_FRAME_SIZE	576
+#define ETHERNET_FRAME_SIZE	590
 #define ETHERNET_FRAME_SIZE_MIN	(14+28) // Ethernet ohne CRC: 14 + ARP/IP+UDP/IP+ICMP: 28
 
 typedef uint32_t IP_Address_t;
