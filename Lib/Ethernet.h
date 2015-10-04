@@ -18,6 +18,12 @@ typedef struct
 	uint16_t      EtherType;
 } ATTR_PACKED Ethernet_Header_t;
 
+typedef struct
+{
+	Ethernet_Header_t Ethernet;
+	uint8_t data[];
+} ATTR_PACKED Ethernet_Packet_t;
+
 uint16_t Ethernet_ProcessPacket(void *packet, uint16_t length) ATTR_WARN_UNUSED_RESULT ATTR_NON_NULL_PTR_ARG(1);
 void Ethernet_ChecksumAdd(uint16_t *checksum, uint16_t word) ATTR_NON_NULL_PTR_ARG(1);
 uint16_t Ethernet_Checksum(const void *data, uint16_t length) ATTR_WARN_UNUSED_RESULT ATTR_NON_NULL_PTR_ARG(1) ATTR_PURE;

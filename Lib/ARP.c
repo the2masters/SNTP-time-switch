@@ -35,48 +35,48 @@ const MAC_Address_t* ARP_searchMAC(const IP_Address_t *IP)
 
 static uint16_t ARP_GeneratePacket(void *packet, ARP_Operation_t direction, const MAC_Address_t *targetMAC, const IP_Address_t *targetIP)
 {
-	ARP_Packet_t *ARP_Packet = &((ARP_FullPacket_t *)packet)->ARP;
+	ARP_Header_t *ARP = &((ARP_Packet_t *)packet)->ARP;
 
-	ARP_Packet->HardwareType	= ARP_HARDWARE_ETHERNET;
-	ARP_Packet->ProtocolType	= ETHERTYPE_IPV4;
-	ARP_Packet->HLEN		= sizeof(MAC_Address_t);
-	ARP_Packet->PLEN		= sizeof(IP_Address_t);
-	ARP_Packet->Operation		= direction;
-	ARP_Packet->SenderMAC		= OwnMACAddress;
-	ARP_Packet->SenderIP		= OwnIPAddress;
-	ARP_Packet->TargetMAC		= *targetMAC;
-	ARP_Packet->TargetIP		= *targetIP;
+	ARP->HardwareType	= ARP_HARDWARE_ETHERNET;
+	ARP->ProtocolType	= ETHERTYPE_IPV4;
+	ARP->HLEN		= sizeof(MAC_Address_t);
+	ARP->PLEN		= sizeof(IP_Address_t);
+	ARP->Operation		= direction;
+	ARP->SenderMAC		= OwnMACAddress;
+	ARP->SenderIP		= OwnIPAddress;
+	ARP->TargetMAC		= *targetMAC;
+	ARP->TargetIP		= *targetIP;
 
-	return Ethernet_GenerateHeader(packet, targetMAC, ETHERTYPE_ARP, sizeof(ARP_Packet_t));
+	return Ethernet_GenerateHeader(packet, targetMAC, ETHERTYPE_ARP, sizeof(ARP_Header_t));
 }
 
 uint16_t ARP_ProcessPacket(void *packet, uint16_t length)
 {
-	if(length != sizeof(ARP_FullPacket_t))
+	if(length != sizeof(ARP_Packet_t))
 		return 0;
 
-	ARP_Packet_t* ARP_Packet = &((ARP_FullPacket_t *)packet)->ARP;
+	ARP_Header_t* ARP = &((ARP_Packet_t *)packet)->ARP;
 
-	switch(ARP_Packet->Operation)
+	switch(ARP->Operation)
 	{
 		case ARP_OPERATION_REQUEST:
-			if(ARP_Packet->TargetIP != OwnIPAddress) break;
+			if(ARP->TargetIP != OwnIPAddress) break;
 
 			// Get destination MAC and IP and recreate ARP Header
-			MAC_Address_t destinationMAC = ARP_Packet->SenderMAC;
-			IP_Address_t destinationIP = ARP_Packet->SenderIP;
+			MAC_Address_t destinationMAC = ARP->SenderMAC;
+			IP_Address_t destinationIP = ARP->SenderIP;
 			return ARP_GeneratePacket(packet, ARP_OPERATION_REPLY, &destinationMAC, &destinationIP);
 
 		case ARP_OPERATION_REPLY:
-			if(!IP_compareNet(&OwnIPAddress, &ARP_Packet->SenderIP)) break;
+			if(!IP_compareNet(&OwnIPAddress, &ARP->SenderIP)) break;
 
 			bool IPneu = true;
-			const IP_Hostpart_t IP_Hostpart = IP_getHost(&ARP_Packet->SenderIP);
+			const IP_Hostpart_t IP_Hostpart = IP_getHost(&ARP->SenderIP);
 
 			for(uint8_t i = 0; i < ARRAY_SIZE(ARP_Table); i++)
 				if(ARP_Table[i].IP == IP_Hostpart)
 				{
-					ARP_Table[i].MAC = ARP_Packet->SenderMAC;
+					ARP_Table[i].MAC = ARP->SenderMAC;
 					IPneu = false;
 					break;
 				}
@@ -84,7 +84,7 @@ uint16_t ARP_ProcessPacket(void *packet, uint16_t length)
 			{
 				static uint8_t writePosition = 0;
 				ARP_Table[writePosition].IP = IP_Hostpart;
-				ARP_Table[writePosition].MAC = ARP_Packet->SenderMAC;
+				ARP_Table[writePosition].MAC = ARP->SenderMAC;
 				if(writePosition < ARRAY_SIZE(ARP_Table))
 					writePosition++;
 				else

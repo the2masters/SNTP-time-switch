@@ -32,7 +32,9 @@ typedef struct
 {
 	Ethernet_Header_t Ethernet;
 	IP_Header_t IP;
-} ATTR_PACKED IP_FullHeader_t;
+	uint8_t data[];
+
+} ATTR_PACKED IP_Packet_t;
 
 uint16_t IP_ProcessPacket(void *packet, uint16_t length) ATTR_WARN_UNUSED_RESULT ATTR_NON_NULL_PTR_ARG(1);
 uint16_t IP_GenerateHeader(void *packet, IP_Protocol_t protocol, const IP_Address_t *destinationIP, uint16_t payloadLength) ATTR_WARN_UNUSED_RESULT ATTR_NON_NULL_PTR_ARG(1, 3);

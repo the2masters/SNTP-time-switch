@@ -12,13 +12,13 @@ static inline bool MAC_compare(const MAC_Address_t *a, const MAC_Address_t *b)
 
 uint16_t Ethernet_ProcessPacket(void *packet, uint16_t length)
 {
-	Ethernet_Header_t *Ethernet_Header = (Ethernet_Header_t *)packet;
+	Ethernet_Header_t *Ethernet = &((Ethernet_Packet_t *)packet)->Ethernet;
 
-	if(!(MAC_compare(&Ethernet_Header->Destination, &OwnMACAddress) ||
-	     MAC_compare(&Ethernet_Header->Destination, &BroadcastMACAddress)))
+	if(!(MAC_compare(&Ethernet->Destination, &OwnMACAddress) ||
+	     MAC_compare(&Ethernet->Destination, &BroadcastMACAddress)))
 		return 0;
 
-	switch (Ethernet_Header->EtherType)
+	switch (Ethernet->EtherType)
 	{
 		case ETHERTYPE_ARP:
 			return ARP_ProcessPacket(packet, length);
@@ -67,11 +67,11 @@ uint16_t Ethernet_GenerateHeaderIP(void *packet, const IP_Address_t *destination
 
 uint16_t Ethernet_GenerateHeader(void* packet, const MAC_Address_t *destinationMAC, Ethertype_t ethertype, uint16_t payloadLength)
 {
-	Ethernet_Header_t *Ethernet_Header = (Ethernet_Header_t *)packet;
+	Ethernet_Header_t *Ethernet = &((Ethernet_Packet_t *)packet)->Ethernet;
 
-	Ethernet_Header->Destination	= *destinationMAC;
-	Ethernet_Header->Source		= OwnMACAddress;
-	Ethernet_Header->EtherType	= ethertype;
+	Ethernet->Destination	= *destinationMAC;
+	Ethernet->Source	= OwnMACAddress;
+	Ethernet->EtherType	= ethertype;
 
 	return sizeof(Ethernet_Header_t) + payloadLength;
 }

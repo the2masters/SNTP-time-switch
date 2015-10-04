@@ -22,9 +22,11 @@ typedef struct
 
 typedef struct
 {
-	IP_FullHeader_t IP;
+	Ethernet_Header_t Ethernet;
+	IP_Header_t IP;
 	UDP_Header_t UDP;
-} ATTR_PACKED UDP_FullHeader_t;
+	uint8_t data[];
+} ATTR_PACKED UDP_Packet_t;
 
 uint16_t UDP_ProcessPacket(void *packet, uint16_t length) ATTR_WARN_UNUSED_RESULT ATTR_NON_NULL_PTR_ARG(1);
 uint16_t UDP_GenerateHeader(void *packet, const IP_Address_t *destinationIP, uint16_t destinationPort, uint16_t payloadLength) ATTR_WARN_UNUSED_RESULT ATTR_NON_NULL_PTR_ARG(1, 2);

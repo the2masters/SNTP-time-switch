@@ -35,10 +35,10 @@ static inline uint16_t frac2timer(uint32_t fract)
 #define MaxRoundTripSec 2
 uint16_t SNTP_ProcessPacket(void *packet, uint16_t length)
 {
-	if(length != sizeof(SNTP_FullPacket_t))
+	if(length != sizeof(SNTP_Packet_t))
 		return 0;
 
-	SNTP_Packet_t* SNTP  = &((SNTP_FullPacket_t *)packet)->SNTP;
+	SNTP_Header_t* SNTP  = &((SNTP_Packet_t *)packet)->SNTP;
 
 	if ((SNTP->VersionMode & 0x3F) != SNTP_VERSIONMODESERVER || (SNTP->VersionMode & 0xC0) == 0xC0 || (SNTP->TransmitTimestampSec == 0 && SNTP->TransmitTimestampSub == 0))
 		return 0;
@@ -84,16 +84,16 @@ uint16_t SNTP_ProcessPacket(void *packet, uint16_t length)
 
 uint16_t SNTP_GeneratePacket(void *packet)
 {
-	SNTP_Packet_t *SNTP_Packet = &((SNTP_FullPacket_t *)packet)->SNTP;
+	SNTP_Header_t *SNTP = &((SNTP_Packet_t *)packet)->SNTP;
 
-	memset(SNTP_Packet, 0, sizeof(SNTP_Packet_t));
-	SNTP_Packet->VersionMode = SNTP_VERSIONMODECLIENT;
+	memset(SNTP, 0, sizeof(SNTP_Packet_t));
+	SNTP->VersionMode = SNTP_VERSIONMODECLIENT;
 
-#ifndef SNTP_CALCULATE_ROUNDTRIP
-	SNTP_Packet->TransmitTimestampSec = time(NULL);
-	SNTP_Packet->TransmitTimestampSub = TCNT1;
+#ifdef SNTP_CALCULATE_ROUNDTRIP
+	SNTP->TransmitTimestampSec = time(NULL);
+	SNTP->TransmitTimestampSub = TCNT1;
 #endif
 
-	return UDP_GenerateHeader(packet, &SNTPIPAddress, UDP_PORT_NTP, sizeof(SNTP_Packet_t));
+	return UDP_GenerateHeader(packet, &SNTPIPAddress, UDP_PORT_NTP, sizeof(SNTP_Header_t));
 }
 
