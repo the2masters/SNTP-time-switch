@@ -37,7 +37,7 @@ typedef struct
 } ATTR_PACKED IP_Packet_t;
 
 uint16_t IP_ProcessPacket(void *packet, uint16_t length) ATTR_WARN_UNUSED_RESULT ATTR_NON_NULL_PTR_ARG(1);
-uint16_t IP_GenerateHeader(void *packet, IP_Protocol_t protocol, const IP_Address_t *destinationIP, uint16_t payloadLength) ATTR_WARN_UNUSED_RESULT ATTR_NON_NULL_PTR_ARG(1, 3);
+int8_t IP_GenerateHeader(uint8_t packet[], IP_Protocol_t protocol, const IP_Address_t *destinationIP, uint16_t payloadLength) ATTR_WARN_UNUSED_RESULT ATTR_NON_NULL_PTR_ARG(1, 3);
 
 ATTR_WARN_UNUSED_RESULT ATTR_NON_NULL_PTR_ARG(1, 2) ATTR_PURE ATTR_ALWAYS_INLINE
 static inline bool IP_compareNet(const IP_Address_t *a, const IP_Address_t *b)

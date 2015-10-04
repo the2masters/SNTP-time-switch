@@ -28,7 +28,7 @@ typedef struct
 
 const MAC_Address_t* ARP_searchMAC(const IP_Address_t *IP) ATTR_WARN_UNUSED_RESULT ATTR_NON_NULL_PTR_ARG(1);
 uint16_t ARP_ProcessPacket(void* packet, uint16_t length) ATTR_WARN_UNUSED_RESULT ATTR_NON_NULL_PTR_ARG(1);
-uint16_t ARP_GenerateRequest(void* packet, const IP_Address_t *destinationIP) ATTR_WARN_UNUSED_RESULT ATTR_NON_NULL_PTR_ARG(1, 2);
+uint8_t ARP_GenerateRequest(uint8_t packet[], const IP_Address_t *destinationIP) ATTR_WARN_UNUSED_RESULT ATTR_NON_NULL_PTR_ARG(1, 2);
 
 #endif
 

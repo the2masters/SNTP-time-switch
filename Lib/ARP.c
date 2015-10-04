@@ -33,9 +33,10 @@ const MAC_Address_t* ARP_searchMAC(const IP_Address_t *IP)
 	return retVal;
 }
 
-static uint16_t ARP_GeneratePacket(void *packet, ARP_Operation_t direction, const MAC_Address_t *targetMAC, const IP_Address_t *targetIP)
+static uint8_t ARP_GeneratePacket(uint8_t packet[], ARP_Operation_t direction, const MAC_Address_t *targetMAC, const IP_Address_t *targetIP)
 {
-	ARP_Header_t *ARP = &((ARP_Packet_t *)packet)->ARP;
+	uint8_t offset = Ethernet_GenerateHeader(packet, targetMAC, ETHERTYPE_ARP);
+	ARP_Header_t *ARP = (ARP_Header_t *)(packet + offset);
 
 	ARP->HardwareType	= ARP_HARDWARE_ETHERNET;
 	ARP->ProtocolType	= ETHERTYPE_IPV4;
@@ -47,7 +48,7 @@ static uint16_t ARP_GeneratePacket(void *packet, ARP_Operation_t direction, cons
 	ARP->TargetMAC		= *targetMAC;
 	ARP->TargetIP		= *targetIP;
 
-	return Ethernet_GenerateHeader(packet, targetMAC, ETHERTYPE_ARP, sizeof(ARP_Header_t));
+	return offset + sizeof(ARP_Header_t);
 }
 
 uint16_t ARP_ProcessPacket(void *packet, uint16_t length)
@@ -96,7 +97,7 @@ uint16_t ARP_ProcessPacket(void *packet, uint16_t length)
 	return 0;
 }
 
-uint16_t ARP_GenerateRequest(void *packet, const IP_Address_t *destinationIP)
+uint8_t ARP_GenerateRequest(uint8_t packet[], const IP_Address_t *destinationIP)
 {
 	return ARP_GeneratePacket(packet, ARP_OPERATION_REQUEST, &BroadcastMACAddress, destinationIP);
 }

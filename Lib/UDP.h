@@ -5,11 +5,9 @@
 #include "IP.h"
 #include "resources.h"
 
+// TODO: Lösch mich
 typedef enum {
-	UDP_PORT_DNS		= CPU_TO_BE16(53),
-	UDP_PORT_DHCP_REQUEST	= CPU_TO_BE16(67),
-	UDP_PORT_DHCP_REPLY	= CPU_TO_BE16(68),
-	UDP_PORT_NTP		= CPU_TO_BE16(123)
+	UDP_PORT_NTP		= 123,
 } UDP_Port_t;
 
 typedef struct
@@ -29,7 +27,7 @@ typedef struct
 } ATTR_PACKED UDP_Packet_t;
 
 uint16_t UDP_ProcessPacket(void *packet, uint16_t length) ATTR_WARN_UNUSED_RESULT ATTR_NON_NULL_PTR_ARG(1);
-uint16_t UDP_GenerateHeader(void *packet, const IP_Address_t *destinationIP, uint16_t destinationPort, uint16_t payloadLength) ATTR_WARN_UNUSED_RESULT ATTR_NON_NULL_PTR_ARG(1, 2);
+int8_t UDP_GenerateHeader(uint8_t packet[], const IP_Address_t *destinationIP, UDP_Port_t sourcePort, UDP_Port_t destinationPort, uint16_t payloadLength) ATTR_WARN_UNUSED_RESULT ATTR_NON_NULL_PTR_ARG(1, 2);
 
 #endif
 

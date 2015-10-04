@@ -31,9 +31,13 @@ uint16_t IP_ProcessPacket(void *packet, uint16_t length)
 	return 0;
 }
 
-uint16_t IP_GenerateHeader(void *packet, IP_Protocol_t protocol, const IP_Address_t *destinationIP, uint16_t payloadLength)
+int8_t IP_GenerateHeader(uint8_t packet[], IP_Protocol_t protocol, const IP_Address_t *destinationIP, uint16_t payloadLength)
 {
-	IP_Header_t *IP = &((IP_Packet_t *)packet)->IP;
+	int8_t offset = Ethernet_GenerateHeaderIP(packet, destinationIP, ETHERTYPE_IPV4);
+	if(offset < 0)
+		return offset;
+
+	IP_Header_t *IP = (IP_Header_t *)(packet + offset);
 
 	IP->HeaderLengthVersion	= IP_HEADERLENGTHVERSION;
 	IP->TypeOfService	= 0;
@@ -50,5 +54,5 @@ uint16_t IP_GenerateHeader(void *packet, IP_Protocol_t protocol, const IP_Addres
 	if(!IP_compareNet(&OwnIPAddress, destinationIP))
 		destinationIP = &RouterIPAddress;
 
-	return Ethernet_GenerateHeaderIP(packet, destinationIP, ETHERTYPE_IPV4, sizeof(IP_Header_t) + payloadLength);
+	return offset + sizeof(IP_Header_t);
 }

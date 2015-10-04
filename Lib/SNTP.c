@@ -82,11 +82,15 @@ uint16_t SNTP_ProcessPacket(void *packet, uint16_t length)
 	return 0;
 }
 
-uint16_t SNTP_GeneratePacket(void *packet)
+int8_t SNTP_GeneratePacket(uint8_t packet[])
 {
-	SNTP_Header_t *SNTP = &((SNTP_Packet_t *)packet)->SNTP;
+	int8_t offset = UDP_GenerateHeader(packet, &SNTPIPAddress, UDP_PORT_NTP, UDP_PORT_NTP, sizeof(SNTP_Header_t));
+	if(offset < 0)
+		return offset;
 
-	memset(SNTP, 0, sizeof(SNTP_Packet_t));
+	SNTP_Header_t *SNTP = (SNTP_Header_t *)(packet + offset);
+
+	memset(SNTP, 0, sizeof(SNTP_Header_t));
 	SNTP->VersionMode = SNTP_VERSIONMODECLIENT;
 
 #ifdef SNTP_CALCULATE_ROUNDTRIP
@@ -94,6 +98,6 @@ uint16_t SNTP_GeneratePacket(void *packet)
 	SNTP->TransmitTimestampSub = TCNT1;
 #endif
 
-	return UDP_GenerateHeader(packet, &SNTPIPAddress, UDP_PORT_NTP, sizeof(SNTP_Header_t));
+	return offset + sizeof(SNTP_Header_t);
 }
 

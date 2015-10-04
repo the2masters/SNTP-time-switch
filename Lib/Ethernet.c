@@ -56,22 +56,22 @@ uint16_t Ethernet_Checksum(const void *data, uint16_t length)
 	return ~Checksum;
 }
 
-uint16_t Ethernet_GenerateHeaderIP(void *packet, const IP_Address_t *destinationIP, Ethertype_t ethertype, uint16_t payloadLength)
+int8_t Ethernet_GenerateHeaderIP(uint8_t packet[], const IP_Address_t *destinationIP, Ethertype_t ethertype)
 {
 	const MAC_Address_t *MAC = ARP_searchMAC(destinationIP);
 	if(MAC == NULL)
-		return ARP_GenerateRequest(packet, destinationIP);
+		return -ARP_GenerateRequest(packet, destinationIP);
 
-	return Ethernet_GenerateHeader(packet, MAC, ethertype, payloadLength);
+	return Ethernet_GenerateHeader(packet, MAC, ethertype);
 }
 
-uint16_t Ethernet_GenerateHeader(void* packet, const MAC_Address_t *destinationMAC, Ethertype_t ethertype, uint16_t payloadLength)
+uint8_t Ethernet_GenerateHeader(uint8_t packet[], const MAC_Address_t *destinationMAC, Ethertype_t ethertype)
 {
-	Ethernet_Header_t *Ethernet = &((Ethernet_Packet_t *)packet)->Ethernet;
+	Ethernet_Header_t *Ethernet = (Ethernet_Header_t *)packet;
 
 	Ethernet->Destination	= *destinationMAC;
 	Ethernet->Source	= OwnMACAddress;
 	Ethernet->EtherType	= ethertype;
 
-	return sizeof(Ethernet_Header_t) + payloadLength;
+	return sizeof(Ethernet_Header_t);
 }
