@@ -7,7 +7,7 @@
 #define CIDR		24
 #define IP_OWN		192, 168, 200, 40
 #define IP_ROUTER	192, 168, 200, 3
-#define IP_SNTP		192, 168, 201, 1
+#define IP_SNTP		192, 168, 200, 3
 #define MAC_OWN		0x02, 0x00, 0x00, 0x00, 0x00, 0x40
 
 #define ETHERNET_FRAME_SIZE	590

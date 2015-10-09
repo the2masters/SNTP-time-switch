@@ -22,7 +22,6 @@ C_STANDARD   = gnu1x
 SRC          = $(LUFA_SRC_USB_DEVICE) $(TARGET).c Descriptors.c resources.c bootup.c USB.c Lib/Ethernet.c Lib/UDP.c Lib/ARP.c Lib/ICMP.c Lib/IP.c Lib/SNTP.c
 LUFA_PATH    = ../lufa/LUFA
 CC_FLAGS     = -DUSE_LUFA_CONFIG_HEADER -IConfig/ -Winline -Wall -Wextra -Wpadded -Wwrite-strings -Wcast-align -Wundef -Wfloat-equal -Wswitch-enum -Wno-long-long -flto
-# Causes bugs: -flto
 LD_FLAGS     = $(CC_FLAGS)
 
 # Default target

@@ -10,22 +10,36 @@ static inline bool MAC_compare(const MAC_Address_t *a, const MAC_Address_t *b)
 	return memcmp(a, b, sizeof(MAC_Address_t)) == 0;
 }
 
-uint16_t Ethernet_ProcessPacket(void *packet, uint16_t length)
+uint16_t Ethernet_ProcessPacket(uint8_t packet[], uint16_t length)
 {
-	Ethernet_Header_t *Ethernet = &((Ethernet_Packet_t *)packet)->Ethernet;
+	// Length is already checked
+	Ethernet_Header_t *Ethernet = (Ethernet_Header_t *)packet;
 
 	if(!(MAC_compare(&Ethernet->Destination, &OwnMACAddress) ||
 	     MAC_compare(&Ethernet->Destination, &BroadcastMACAddress)))
 		return 0;
 
+	length -= sizeof(Ethernet_Header_t);
 	switch (Ethernet->EtherType)
 	{
 		case ETHERTYPE_ARP:
-			return ARP_ProcessPacket(packet, length);
+			length = ARP_ProcessPacket(Ethernet->data, length);
+			break;
 		case ETHERTYPE_IPV4:
-			return IP_ProcessPacket(packet, length);
+			length = IP_ProcessPacket(Ethernet->data, length);
+			break;
+		default:
+			return 0;
 	}
-	return 0;
+
+	if(length)
+	{
+		length += sizeof(Ethernet_Header_t);
+
+		Ethernet->Destination = Ethernet->Source;
+		Ethernet->Source = OwnMACAddress;
+	}
+	return length;
 }
 
 void Ethernet_ChecksumAdd(uint16_t *checksum, uint16_t word)
@@ -39,7 +53,6 @@ void Ethernet_ChecksumAdd(uint16_t *checksum, uint16_t word)
                (*checksum)++;
 #endif
 }
-
 
 uint16_t Ethernet_Checksum(const void *data, uint16_t length)
 {

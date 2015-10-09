@@ -33,14 +33,15 @@ static inline uint16_t frac2timer(uint32_t fract)
 }
 
 #define MaxRoundTripSec 2
-uint16_t SNTP_ProcessPacket(void *packet, uint16_t length)
+time_t SNTP_ProcessPacket(uint8_t packet[], uint16_t length)
 {
-	if(length != sizeof(SNTP_Packet_t))
+	if(length != sizeof(SNTP_Header_t))
 		return 0;
 
-	SNTP_Header_t* SNTP  = &((SNTP_Packet_t *)packet)->SNTP;
+	SNTP_Header_t* SNTP  = (SNTP_Header_t *)packet;
 
-	if ((SNTP->VersionMode & 0x3F) != SNTP_VERSIONMODESERVER || (SNTP->VersionMode & 0xC0) == 0xC0 || (SNTP->TransmitTimestampSec == 0 && SNTP->TransmitTimestampSub == 0))
+	if ((SNTP->VersionMode & 0x3F) != SNTP_VERSIONMODESERVER || (SNTP->VersionMode & 0xC0) == 0xC0 ||
+	    (SNTP->TransmitTimestampSec == 0 && SNTP->TransmitTimestampSub == 0))
 		return 0;
 
 #ifndef SNTP_CALCULATE_ROUNDTRIP
@@ -76,10 +77,7 @@ uint16_t SNTP_ProcessPacket(void *packet, uint16_t length)
 	TCNT1 = (uint16_t)DestinationTimestampSub;
 #endif
 
-	set_system_time(neueZeit);
-	reloadtime = neueZeit + ONE_HOUR;
-	nextCalc = 0;
-	return 0;
+	return neueZeit;
 }
 
 int8_t SNTP_GeneratePacket(uint8_t packet[])

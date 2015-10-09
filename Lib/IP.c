@@ -9,50 +9,69 @@
 #define IP_FLAGS_DONTFRAGMENT		CPU_TO_BE16(0x4000)
 
 
-uint16_t IP_ProcessPacket(void *packet, uint16_t length)
+uint16_t IP_ProcessPacket(uint8_t packet[], uint16_t length)
 {
-	IP_Header_t *IP = &((IP_Packet_t *)packet)->IP;
+	// Length is already checked
+	IP_Header_t *IP = (IP_Header_t *)packet;
 
 	if(IP->HeaderLengthVersion != IP_HEADERLENGTHVERSION ||
-	   IP->TotalLength != cpu_to_be16(length - sizeof(Ethernet_Header_t)) ||
+	   be16_to_cpu(IP->Length) != length ||
 	  (IP->FlagsFragment & CPU_TO_BE16(0x3FFF)))
 		return 0;
 
 	if(IP->DestinationAddress != OwnIPAddress && IP->DestinationAddress != BroadcastIPAddress)
 		return 0;
 
+	length -= sizeof(IP_Header_t);
 	switch (IP->Protocol)
 	{
 		case IP_PROTOCOL_ICMP:
-			return ICMP_ProcessPacket(packet, length);
+			length = ICMP_ProcessPacket(IP->data, length);
+			break;
 		case IP_PROTOCOL_UDP:
-			return UDP_ProcessPacket(packet, length);
+			length = UDP_ProcessPacket(IP->data, &IP->SourceAddress, length);
+			break;
+		default:
+			return 0;
 	}
-	return 0;
+
+	if(length)
+	{
+		length += sizeof(IP_Header_t);
+
+		IP->Length		= cpu_to_be16(length);
+		IP->TTL			= DEFAULT_TTL;
+		IP->Checksum		= 0;
+		IP->DestinationAddress	= IP->SourceAddress;
+		IP->SourceAddress	= OwnIPAddress;
+		IP->Checksum		= Ethernet_Checksum(IP, sizeof(IP_Header_t));
+	}
+	return length;
 }
 
 int8_t IP_GenerateHeader(uint8_t packet[], IP_Protocol_t protocol, const IP_Address_t *destinationIP, uint16_t payloadLength)
 {
-	int8_t offset = Ethernet_GenerateHeaderIP(packet, destinationIP, ETHERTYPE_IPV4);
-	if(offset < 0)
+	const IP_Address_t *routerIP = destinationIP;
+	if(!(IP_compareNet(&OwnIPAddress, destinationIP)))
+		routerIP = &RouterIPAddress;
+
+	int8_t offset = Ethernet_GenerateHeaderIP(packet, routerIP, ETHERTYPE_IPV4);
+	if(offset <= 0)
 		return offset;
 
 	IP_Header_t *IP = (IP_Header_t *)(packet + offset);
 
 	IP->HeaderLengthVersion	= IP_HEADERLENGTHVERSION;
 	IP->TypeOfService	= 0;
-	IP->TotalLength		= cpu_to_be16(sizeof(IP_Header_t) + payloadLength);
+	IP->Length		= cpu_to_be16(sizeof(IP_Header_t) + payloadLength);
 	IP->Identification	= 0;
 	IP->FlagsFragment	= IP_FLAGS_DONTFRAGMENT;
 	IP->TTL			= DEFAULT_TTL;
 	IP->Protocol		= protocol;
-	IP->HeaderChecksum	= 0;		// First set it to 0, later calculate correct checksum
+	IP->Checksum		= 0;		// First set it to 0, later calculate correct checksum
 	IP->SourceAddress	= OwnIPAddress;
 	IP->DestinationAddress	= *destinationIP;
-	IP->HeaderChecksum	= Ethernet_Checksum(IP, sizeof(IP_Header_t));
-
-	if(!IP_compareNet(&OwnIPAddress, destinationIP))
-		destinationIP = &RouterIPAddress;
+	IP->Checksum		= Ethernet_Checksum(IP, sizeof(IP_Header_t));
 
 	return offset + sizeof(IP_Header_t);
 }

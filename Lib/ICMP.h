@@ -12,19 +12,12 @@ typedef enum {
 
 typedef struct
 {
-	uint8_t Type;
-	uint8_t Code;
-	uint16_t Checksum;
+	uint8_t		Type;
+	uint8_t		Code;
+	uint16_t	Checksum;
+	uint8_t		data[];
 } ATTR_PACKED ICMP_Header_t;
 
-typedef struct
-{
-	Ethernet_Header_t Ethernet;
-	IP_Header_t IP;
-	ICMP_Header_t ICMP;
-	uint8_t data[];
-} ATTR_PACKED ICMP_Packet_t;
-
-uint16_t ICMP_ProcessPacket(void *packet, uint16_t length) ATTR_WARN_UNUSED_RESULT ATTR_NON_NULL_PTR_ARG(1);
+uint16_t ICMP_ProcessPacket(uint8_t packet[], uint16_t length) ATTR_WARN_UNUSED_RESULT ATTR_NON_NULL_PTR_ARG(1);
 
 #endif

@@ -29,15 +29,7 @@ typedef struct
 	uint32_t TransmitTimestampSub;
 } ATTR_PACKED SNTP_Header_t;
 
-typedef struct
-{
-	Ethernet_Header_t Ethernet;
-	IP_Header_t IP;
-	UDP_Header_t UDP;
-	SNTP_Header_t SNTP;
-} ATTR_PACKED SNTP_Packet_t;
-
-uint16_t SNTP_ProcessPacket(void *packet, uint16_t length) ATTR_WARN_UNUSED_RESULT ATTR_NON_NULL_PTR_ARG(1);
+uint16_t SNTP_ProcessPacket(uint8_t packet[], uint16_t length) ATTR_WARN_UNUSED_RESULT ATTR_NON_NULL_PTR_ARG(1);
 int8_t SNTP_GeneratePacket(uint8_t packet[]) ATTR_WARN_UNUSED_RESULT ATTR_NON_NULL_PTR_ARG(1);
 
 extern time_t reloadtime;

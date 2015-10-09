@@ -145,10 +145,12 @@ int main(void)
 				{
 					reloadtime = now + 2;	// Solange keine Antwort kommt sende das alle 2 Sekunden
 					int8_t length = SNTP_GeneratePacket(Packet);
-					if(length > 0)
-						PacketLength = length;
-					else // Destination MAC unknown, -length = length of ARP-Packet
-						PacketLength = -length;
+					if(length < 0)
+					{
+						length = -length;
+						reloadtime = now + 1;
+					}
+					PacketLength = length;
 
 					USB_Send();
 

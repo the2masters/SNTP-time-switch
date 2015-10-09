@@ -1,25 +1,44 @@
 #include "UDP.h"
 #include "SNTP.h"
 
-uint16_t UDP_ProcessPacket(void *packet, uint16_t length)
+uint16_t UDP_ProcessPacket(uint8_t packet[], const IP_Address_t *sourceIP, uint16_t length)
 {
-	UDP_Header_t *UDP = &((UDP_Packet_t *)packet)->UDP;
+	// Length is already checked
+	UDP_Header_t *UDP = (UDP_Header_t *)packet;
 
-        if(UDP->Length != cpu_to_be16(length - sizeof(IP_Packet_t)))
+        if(be16_to_cpu(UDP->Length) != length)
                 return 0;
 
-	switch (UDP->SourcePort)
+	length -= sizeof(UDP_Header_t);
+	switch (UDP->DestinationPort)
 	{
-		case UDP_PORT_NTP:
-			return SNTP_ProcessPacket(packet, length);
+		case CPU_TO_BE16(UDP_PORT_NTP):
+			length = SNTP_ProcessPacket(UDP->data, length);
+			break;
+		default:
+			return 0;
 	}
-	return 0;
+
+	if(length)
+	{
+		length += sizeof(UDP_Header_t);
+
+		// Exchange source and destinationPort
+		uint16_t temp = UDP->SourcePort;
+		UDP->SourcePort = UDP->DestinationPort;
+		UDP->DestinationPort = temp;
+
+		// Set length and no checksum
+		UDP->Length = cpu_to_be16(length);
+		UDP->Checksum = 0;		
+	}
+	return length;
 }
 
 int8_t UDP_GenerateHeader(uint8_t packet[], const IP_Address_t *destinationIP, UDP_Port_t sourcePort, UDP_Port_t destinationPort, uint16_t payloadLength)
 {
-	int8_t offset = Ethernet_GenerateHeaderIP(packet, destinationIP, ETHERTYPE_IPV4);
-	if(offset < 0)
+	int8_t offset = IP_GenerateHeader(packet, IP_PROTOCOL_UDP, destinationIP, payloadLength + sizeof(UDP_Header_t));
+	if(offset <= 0)
 		return offset;
 
 	UDP_Header_t *UDP = (UDP_Header_t *)(packet + offset);
