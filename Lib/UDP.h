@@ -5,10 +5,11 @@
 #include "IP.h"
 #include "resources.h"
 
-// TODO: Lösch mich
-typedef enum {
+typedef uint16_t UDP_Port_t;
+enum {
 	UDP_PORT_NTP		= 123,
-} UDP_Port_t;
+	UDP_PORT_AUTOMAT	= 1023,
+};
 
 typedef struct
 {
@@ -20,8 +21,9 @@ typedef struct
 	uint8_t		data[];
 } ATTR_PACKED UDP_Header_t;
 
-uint16_t UDP_ProcessPacket(uint8_t packet[], const IP_Address_t *sourceIP, uint16_t length) ATTR_WARN_UNUSED_RESULT ATTR_NON_NULL_PTR_ARG(1);
-int8_t UDP_GenerateHeader(uint8_t packet[], const IP_Address_t *destinationIP, UDP_Port_t sourcePort, UDP_Port_t destinationPort, uint16_t payloadLength) ATTR_WARN_UNUSED_RESULT ATTR_NON_NULL_PTR_ARG(1, 2);
+uint16_t UDP_ProcessPacket(uint8_t packet[], uint16_t length, const IP_Address_t *sourceIP) ATTR_WARN_UNUSED_RESULT ATTR_NON_NULL_PTR_ARG(1, 3);
+int8_t UDP_GenerateHeader(uint8_t packet[], const IP_Address_t *destinationIP, UDP_Port_t destinationPort, uint16_t payloadLength) ATTR_WARN_UNUSED_RESULT ATTR_NON_NULL_PTR_ARG(1, 2);
+extern uint16_t UDP_Callback(uint8_t packet[], uint16_t length, const IP_Address_t *sourceIP, UDP_Port_t sourcePort) ATTR_WARN_UNUSED_RESULT ATTR_NON_NULL_PTR_ARG(1, 3);
 
 #endif
 

@@ -29,7 +29,7 @@ uint16_t IP_ProcessPacket(uint8_t packet[], uint16_t length)
 			length = ICMP_ProcessPacket(IP->data, length);
 			break;
 		case IP_PROTOCOL_UDP:
-			length = UDP_ProcessPacket(IP->data, &IP->SourceAddress, length);
+			length = UDP_ProcessPacket(IP->data, length, &IP->SourceAddress);
 			break;
 		default:
 			return 0;

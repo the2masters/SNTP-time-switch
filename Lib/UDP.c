@@ -1,7 +1,7 @@
 #include "UDP.h"
 #include "SNTP.h"
 
-uint16_t UDP_ProcessPacket(uint8_t packet[], const IP_Address_t *sourceIP, uint16_t length)
+uint16_t UDP_ProcessPacket(uint8_t packet[], uint16_t length, const IP_Address_t *sourceIP)
 {
 	// Length is already checked
 	UDP_Header_t *UDP = (UDP_Header_t *)packet;
@@ -10,14 +10,7 @@ uint16_t UDP_ProcessPacket(uint8_t packet[], const IP_Address_t *sourceIP, uint1
                 return 0;
 
 	length -= sizeof(UDP_Header_t);
-	switch (UDP->DestinationPort)
-	{
-		case CPU_TO_BE16(UDP_PORT_NTP):
-			length = SNTP_ProcessPacket(UDP->data, length);
-			break;
-		default:
-			return 0;
-	}
+	length = UDP_Callback(UDP->data, length, sourceIP, UDP->SourcePort);
 
 	if(length)
 	{
@@ -35,7 +28,7 @@ uint16_t UDP_ProcessPacket(uint8_t packet[], const IP_Address_t *sourceIP, uint1
 	return length;
 }
 
-int8_t UDP_GenerateHeader(uint8_t packet[], const IP_Address_t *destinationIP, UDP_Port_t sourcePort, UDP_Port_t destinationPort, uint16_t payloadLength)
+int8_t UDP_GenerateHeader(uint8_t packet[], const IP_Address_t *destinationIP, UDP_Port_t destinationPort, uint16_t payloadLength)
 {
 	int8_t offset = IP_GenerateHeader(packet, IP_PROTOCOL_UDP, destinationIP, payloadLength + sizeof(UDP_Header_t));
 	if(offset <= 0)
@@ -43,7 +36,7 @@ int8_t UDP_GenerateHeader(uint8_t packet[], const IP_Address_t *destinationIP, U
 
 	UDP_Header_t *UDP = (UDP_Header_t *)(packet + offset);
 
-	UDP->SourcePort = cpu_to_be16(sourcePort);
+	UDP->SourcePort = CPU_TO_BE16(UDP_PORT_AUTOMAT);
 	UDP->DestinationPort = cpu_to_be16(destinationPort);
 	UDP->Length = cpu_to_be16(sizeof(UDP_Header_t) + payloadLength);
 	UDP->Checksum = 0;

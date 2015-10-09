@@ -82,7 +82,7 @@ time_t SNTP_ProcessPacket(uint8_t packet[], uint16_t length)
 
 int8_t SNTP_GeneratePacket(uint8_t packet[])
 {
-	int8_t offset = UDP_GenerateHeader(packet, &SNTPIPAddress, UDP_PORT_NTP, UDP_PORT_NTP, sizeof(SNTP_Header_t));
+	int8_t offset = UDP_GenerateHeader(packet, &SNTPIPAddress, UDP_PORT_NTP, sizeof(SNTP_Header_t));
 	if(offset < 0)
 		return offset;
 

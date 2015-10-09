@@ -116,6 +116,19 @@ void calc(time_t time)
 	}
 }
 
+uint16_t UDP_Callback(uint8_t packet[], uint16_t length, const IP_Address_t *sourceIP, uint16_t sourcePort)
+{
+	if(sourcePort == CPU_TO_BE16(UDP_PORT_NTP))
+	{
+		time_t now = SNTP_ProcessPacket(packet, length);
+		if(now == 0) return 0;
+		set_system_time(now);
+		reloadtime = now + ONE_HOUR;
+		nextCalc = 0;
+	}
+	return 0;
+}
+
 int main(void)
 {
 	timer1_init(F_CPU);
