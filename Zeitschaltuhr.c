@@ -49,8 +49,8 @@ static inline void relay_set(Relay_t num, bool onoff)
 	}
 }
 
-time_t nextCalc = UINT32_MAX;	// Wait until first received SNTP-Packet
-time_t reloadtime = 5;		// Start 2s after bootup sending SNTP-Packets
+static time_t nextCalc = UINT32_MAX;	// Wait until first received SNTP-Packet
+static time_t reloadtime = 5;		// Start 2s after bootup sending SNTP-Packets
 
 // This is mktime without changing it's arguments but recalculate dst each time
 // { struct tm tm = *time; tm.tm_isdst = -1; return mktime(&tm); }
@@ -116,9 +116,9 @@ void calc(time_t time)
 	}
 }
 
-uint16_t UDP_Callback(uint8_t packet[], uint16_t length, const IP_Address_t *sourceIP, uint16_t sourcePort)
+uint16_t UDP_Callback(uint8_t packet[], uint16_t length, const IP_Address_t *sourceIP, uint16_t sourcePort, uint16_t destinationPort)
 {
-	if(sourcePort == CPU_TO_BE16(UDP_PORT_NTP))
+	if(sourcePort == UDP_PORT_NTP)
 	{
 		time_t now = SNTP_ProcessPacket(packet, length);
 		if(now == 0) return 0;

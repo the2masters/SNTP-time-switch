@@ -43,7 +43,4 @@ extern const IP_Address_t SNTPIPAddress;
 
 #define NETMASK_BE CPU_TO_BE32(~(uint32_t)(_BV(32 - CIDR) - 1))
 
-extern time_t reloadtime;
-extern time_t nextCalc;
-
 #endif //_RESOURCES_H_

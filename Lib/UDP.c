@@ -10,7 +10,8 @@ uint16_t UDP_ProcessPacket(uint8_t packet[], uint16_t length, const IP_Address_t
                 return 0;
 
 	length -= sizeof(UDP_Header_t);
-	length = UDP_Callback(UDP->data, length, sourceIP, UDP->SourcePort);
+
+	length = UDP_Callback(UDP->data, length, sourceIP, UDP->SourcePort, UDP->DestinationPort);
 
 	if(length)
 	{
@@ -36,7 +37,7 @@ int8_t UDP_GenerateHeader(uint8_t packet[], const IP_Address_t *destinationIP, U
 
 	UDP_Header_t *UDP = (UDP_Header_t *)(packet + offset);
 
-	UDP->SourcePort = CPU_TO_BE16(UDP_PORT_AUTOMAT);
+	UDP->SourcePort = UDP_PORT_AUTOMAT;
 	UDP->DestinationPort = cpu_to_be16(destinationPort);
 	UDP->Length = cpu_to_be16(sizeof(UDP_Header_t) + payloadLength);
 	UDP->Checksum = 0;

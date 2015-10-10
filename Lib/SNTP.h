@@ -31,6 +31,4 @@ typedef struct
 
 time_t SNTP_ProcessPacket(uint8_t packet[], uint16_t length) ATTR_WARN_UNUSED_RESULT ATTR_NON_NULL_PTR_ARG(1);
 int8_t SNTP_GeneratePacket(uint8_t packet[]) ATTR_WARN_UNUSED_RESULT ATTR_NON_NULL_PTR_ARG(1);
-
-extern time_t reloadtime;
 #endif
