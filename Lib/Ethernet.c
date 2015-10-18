@@ -1,6 +1,14 @@
 #include "Ethernet.h"
-#include "ARP.h"
 #include "IP.h"
+#include "ARP.h"
+
+typedef struct
+{
+	MAC_Address_t	Destination;
+	MAC_Address_t	Source;
+	uint16_t	EtherType;
+	uint8_t		data[];
+} ATTR_PACKED Ethernet_Header_t;
 
 const MAC_Address_t BroadcastMACAddress = {{0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF}};
 
@@ -10,36 +18,39 @@ static inline bool MAC_compare(const MAC_Address_t *a, const MAC_Address_t *b)
 	return memcmp(a, b, sizeof(MAC_Address_t)) == 0;
 }
 
-uint16_t Ethernet_ProcessPacket(uint8_t packet[], uint16_t length)
+bool Ethernet_ProcessPacket(uint8_t packet[], uint16_t length)
 {
-	// Length is already checked
+	if(length < ETHERNET_FRAME_SIZE_MIN)
+		return false;
+
 	Ethernet_Header_t *Ethernet = (Ethernet_Header_t *)packet;
 
 	if(!(MAC_compare(&Ethernet->Destination, &OwnMACAddress) ||
 	     MAC_compare(&Ethernet->Destination, &BroadcastMACAddress)))
-		return 0;
+		return false;
 
 	length -= sizeof(Ethernet_Header_t);
+	bool reflect;
 	switch (Ethernet->EtherType)
 	{
 		case ETHERTYPE_ARP:
-			length = ARP_ProcessPacket(Ethernet->data, length);
+			reflect = ARP_ProcessPacket(Ethernet->data, length);
 			break;
 		case ETHERTYPE_IPV4:
-			length = IP_ProcessPacket(Ethernet->data, length);
+			reflect = IP_ProcessPacket(Ethernet->data, length);
 			break;
 		default:
-			return 0;
+			return false;
 	}
 
-	if(length)
+	if(reflect)
 	{
-		length += sizeof(Ethernet_Header_t);
-
 		Ethernet->Destination = Ethernet->Source;
 		Ethernet->Source = OwnMACAddress;
+		return true;
+	} else {
+		return false;
 	}
-	return length;
 }
 
 void Ethernet_ChecksumAdd(uint16_t *checksum, uint16_t word)
@@ -69,16 +80,7 @@ uint16_t Ethernet_Checksum(const void *data, uint16_t length)
 	return ~Checksum;
 }
 
-int8_t Ethernet_GenerateHeaderIP(uint8_t packet[], const IP_Address_t *destinationIP, Ethertype_t ethertype)
-{
-	const MAC_Address_t *MAC = ARP_searchMAC(destinationIP);
-	if(MAC == NULL)
-		return -ARP_GenerateRequest(packet, destinationIP);
-
-	return Ethernet_GenerateHeader(packet, MAC, ethertype);
-}
-
-uint8_t Ethernet_GenerateHeader(uint8_t packet[], const MAC_Address_t *destinationMAC, Ethertype_t ethertype)
+static uint8_t Ethernet_WriteHeader(uint8_t packet[], const MAC_Address_t *destinationMAC, Ethertype_t ethertype)
 {
 	Ethernet_Header_t *Ethernet = (Ethernet_Header_t *)packet;
 
@@ -87,4 +89,18 @@ uint8_t Ethernet_GenerateHeader(uint8_t packet[], const MAC_Address_t *destinati
 	Ethernet->EtherType	= ethertype;
 
 	return sizeof(Ethernet_Header_t);
+}
+
+int8_t Ethernet_GenerateRequest(uint8_t packet[], const IP_Address_t *destinationIP, Ethertype_t ethertype)
+{
+	const MAC_Address_t *MAC = ARP_searchMAC(destinationIP);
+	if(MAC == NULL)
+		return -ARP_GenerateBroadcastRequest(packet, destinationIP);
+
+	return Ethernet_WriteHeader(packet, MAC, ethertype);
+}
+
+uint8_t Ethernet_GenerateBroadcastReply(uint8_t packet[], Ethertype_t ethertype)
+{
+	return Ethernet_WriteHeader(packet, &BroadcastMACAddress, ethertype);
 }

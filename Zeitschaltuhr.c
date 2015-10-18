@@ -52,6 +52,8 @@ static inline void relay_set(Relay_t num, bool onoff)
 static time_t nextCalc = UINT32_MAX;	// Wait until first received SNTP-Packet
 static time_t reloadtime = 5;		// Start 2s after bootup sending SNTP-Packets
 
+static Packet_t sendPacket = {.data = Buffer};
+
 // This is mktime without changing it's arguments but recalculate dst each time
 // { struct tm tm = *time; tm.tm_isdst = -1; return mktime(&tm); }
 static time_t my_mktime(const struct tm *time)
@@ -116,17 +118,17 @@ void calc(time_t time)
 	}
 }
 
-uint16_t UDP_Callback(uint8_t packet[], uint16_t length, const IP_Address_t *sourceIP, uint16_t sourcePort, uint16_t destinationPort)
+void UDP_Callback_Reply(uint8_t packet[], const IP_Address_t *sourceIP, UDP_Port_t sourcePort, uint16_t length)
 {
-	if(sourcePort == UDP_PORT_NTP)
+	if(sourcePort == 123 && *sourceIP == SNTPIPAddress)
 	{
 		time_t now = SNTP_ProcessPacket(packet, length);
-		if(now == 0) return 0;
+		if(now == 0) return;
+
 		set_system_time(now);
 		reloadtime = now + ONE_HOUR;
 		nextCalc = 0;
 	}
-	return 0;
 }
 
 int main(void)
@@ -136,7 +138,8 @@ int main(void)
 	set_dst(eu_dst);
 	wdt_enable(WDTO_2S);
 	set_sleep_mode(SLEEP_MODE_IDLE);
-	sleep_enable();
+
+	USB_EnableReceiver();
 
 	GlobalInterruptEnable();
 
@@ -148,6 +151,8 @@ int main(void)
 		{
 			calc(now);
 		}
+		sleep_enable();
+
 
 		if(USB_isReady())
 		{
@@ -156,24 +161,26 @@ int main(void)
 			{
 				if(USB_prepareTS())
 				{
-					reloadtime = now + 2;	// Solange keine Antwort kommt sende das alle 2 Sekunden
-					int8_t length = SNTP_GeneratePacket(Packet);
+					int8_t length = SNTP_GenerateRequest(sendPacket.data, &SNTPIPAddress, 123);
 					if(length < 0)
 					{
-						length = -length;
-						reloadtime = now + 1;
+						reloadtime = now + 1;	// Timeout 1s in case of missing ARP entry
+						sendPacket.len = -length;
+					} else {
+						reloadtime = now + 2;	// Timeout 2s in case of no answer
+						sendPacket.len = length;
 					}
-					PacketLength = length;
 
-					USB_Send();
+					USB_Send(sendPacket);
 
 				}
 			}
-			if(USB_Received())
+
+			Packet_t receivedPacket;
+			if(USB_Received(&receivedPacket))
 			{
-				PacketLength = Ethernet_ProcessPacket(Packet, PacketLength);
-				if(PacketLength)
-					USB_Send();
+				if(Ethernet_ProcessPacket(receivedPacket.data, receivedPacket.len))
+					USB_Send(receivedPacket);
 				else
 					USB_EnableReceiver();
 			}

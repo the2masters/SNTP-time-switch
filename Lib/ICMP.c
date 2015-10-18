@@ -1,13 +1,29 @@
 #include "ICMP.h"
+//TODO: put Ethernet_checksum to own file
 #include "Ethernet.h"
 
-uint16_t ICMP_ProcessPacket(uint8_t packet[], uint16_t length)
+typedef struct
+{
+	uint8_t		Type;
+	uint8_t		Code;
+	uint16_t	Checksum;
+
+	uint8_t		data[];
+} ATTR_PACKED ICMP_Header_t;
+
+typedef enum {
+        ICMP_Echo_Reply = 0,
+        ICMP_Echo_Request = 8,
+} ICMP_Type_t;
+#define ICMP_ECHO_Code 0
+
+bool ICMP_ProcessPacket(uint8_t packet[], uint16_t length)
 {
 	// Length is already checked
 	ICMP_Header_t *ICMP = (ICMP_Header_t *)packet;
 
 	if(ICMP->Code != ICMP_ECHO_Code)
-		return 0;
+		return false;
 
 	switch ((ICMP_Type_t)ICMP->Type)
 	{
@@ -17,10 +33,10 @@ uint16_t ICMP_ProcessPacket(uint8_t packet[], uint16_t length)
 			// Adjust Checksum, only difference is Request(8)-Reply(0) at high byte
 			Ethernet_ChecksumAdd(&ICMP->Checksum, CPU_TO_BE16((ICMP_Echo_Request - ICMP_Echo_Reply) << 8));
 
-			return length;
+			return true;
 
 		case ICMP_Echo_Reply:
 		default:
-			return 0;
+			return false;
 	}
 }

@@ -14,15 +14,13 @@
 #define ETHERNET_FRAME_SIZE_MIN	(14+28) // Ethernet ohne CRC: 14 + ARP/IP+UDP/IP+ICMP: 28
 
 typedef uint32_t IP_Address_t;
+typedef uint16_t UDP_Port_t;
 //Damit mir LUFA RNDIS nicht dazwischen funkt
 #define _RNDIS_CLASS_H_
 typedef struct
 {
         uint8_t         Octets[6];
 } __attribute__((packed)) MAC_Address_t;
-
-extern uint8_t Packet[ETHERNET_FRAME_SIZE];
-extern volatile uint16_t PacketLength;
 
 extern const MAC_Address_t OwnMACAddress;
 extern const IP_Address_t OwnIPAddress;

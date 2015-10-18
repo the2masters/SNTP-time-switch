@@ -5,6 +5,29 @@
 #include <avr/cpufunc.h>
 #include <util/atomic.h>
 #include "helper.h"
+#include "UDP.h"
+
+#define SNTP_VERSIONMODECLIENT	0x1B
+#define SNTP_VERSIONMODESERVER	0x1C
+
+typedef struct
+{
+	uint8_t		VersionMode;
+	uint8_t		Stratum;
+	uint8_t		Poll;
+	uint8_t		Precision;
+	uint32_t	RootDelay;
+	uint32_t	RootDispersion;
+	uint32_t	ReferenceIdentifier;
+	uint32_t	ReferenceTimestampSec;
+	uint32_t	ReferenceTimestampSub;
+	uint32_t	OriginateTimestampSec;
+	uint32_t	OriginateTimestampSub;
+	uint32_t	ReceiveTimestampSec;
+	uint32_t	ReceiveTimestampSub;
+	uint32_t	TransmitTimestampSec;
+	uint32_t	TransmitTimestampSub;
+} ATTR_PACKED SNTP_Header_t;
 
 // Passt den Zahlenraum NTP an den Zahlenraum Timer an
 // 32 Bit werden die Zahlen 0-62498 abgebildet. Mathematisch:
@@ -80,9 +103,9 @@ time_t SNTP_ProcessPacket(uint8_t packet[], uint16_t length)
 	return neueZeit;
 }
 
-int8_t SNTP_GeneratePacket(uint8_t packet[])
+int8_t SNTP_GenerateRequest(uint8_t packet[], const IP_Address_t *destinationIP, UDP_Port_t destinationPort)
 {
-	int8_t offset = UDP_GenerateHeader(packet, &SNTPIPAddress, 123, sizeof(SNTP_Header_t));
+	int8_t offset = UDP_GenerateRequest(packet, destinationIP, destinationPort, sizeof(SNTP_Header_t));
 	if(offset < 0)
 		return offset;
 

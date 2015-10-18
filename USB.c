@@ -2,6 +2,7 @@
 #include <stdbool.h>
 #include <stdlib.h>
 #include <avr/power.h>
+#include <avr/sleep.h>
 #include <avr/cpufunc.h>
 #include <util/atomic.h>
 
@@ -13,7 +14,9 @@
 #include "USB.h"
 
 static volatile bool RequestTS = false;
-static volatile uint16_t USBPos = 0;
+static Packet_t current;
+uint8_t Buffer[ETHERNET_FRAME_SIZE];
+#define BufferEnd (Buffer + ARRAY_SIZE(Buffer))
 
 static volatile enum {
 	S_Ready,
@@ -25,22 +28,21 @@ static volatile enum {
 
 static void USB_SendNextFragment(void)
 {
-	_MemoryBarrier();
-	uint8_t sendLength;
-	if(PacketLength < CDC_TXRX_EPSIZE)
-	{
-		sendLength = (uint8_t)PacketLength;
-		State = S_Sended;
-	} else {
-		sendLength = CDC_TXRX_EPSIZE;
-	}
-	uint16_t USBPosTemp = USBPos;
-	for(uint8_t i = sendLength; i; --i)
-		Endpoint_Write_8(Packet[USBPosTemp++]);
+	#if CDC_TXRX_EPSIZE > 255
+	#  error change sendLength to uint16_t
+	#endif
+
+	for(uint8_t blocklen = MIN(current.len, CDC_TXRX_EPSIZE); blocklen; --blocklen)
+		Endpoint_Write_8(*(current.data++));
 	Endpoint_ClearIN();
 
-	USBPos = USBPosTemp;
-	PacketLength -= sendLength;
+	if(current.len < CDC_TXRX_EPSIZE)
+	{
+		State = S_Sended;
+	} else {
+		current.len -= CDC_TXRX_EPSIZE;
+		_MemoryBarrier();
+	}
 }
 
 void EVENT_USB_Endpoint_Interrupt(void)
@@ -57,7 +59,10 @@ void EVENT_USB_Endpoint_Interrupt(void)
 				USB_INT_Disable(USB_INT_TXINI);
 
 				NONATOMIC_BLOCK(NONATOMIC_FORCEOFF)
+				{
+					_MemoryBarrier();
 					USB_SendNextFragment();
+				}
 
 				USB_INT_Enable(USB_INT_TXINI);
 			} else { // State == S_Sended
@@ -80,26 +85,23 @@ void EVENT_USB_Endpoint_Interrupt(void)
 			#error CDC_TXRX_EPSIZE to small
 			#endif
 
-			uint16_t posTemp = USBPos;
-			if(readLength > ARRAY_SIZE(Packet) - posTemp)
+			if(readLength > BufferEnd - current.data)
 			{
-				readLength = ARRAY_SIZE(Packet) - posTemp;
+				readLength = BufferEnd - current.data;
 			}
-			if(posTemp || readLength >= ETHERNET_FRAME_SIZE_MIN)
-			{
-				for(uint8_t i = readLength; i; --i)
-					Packet[posTemp++] = Endpoint_Read_8();
-			}
+
+			for(uint8_t i = readLength; i; --i)
+				*(current.data++) = Endpoint_Read_8();
 			Endpoint_ClearOUT();
+			current.len += readLength;
 
 			if(readLength < CDC_TXRX_EPSIZE)
 			{
-				USBPos = 0;
-				PacketLength = posTemp;
 				State = S_Received;
+				sleep_disable();
+
 				_MemoryBarrier();
 			} else {
-				USBPos = posTemp;
 				GlobalInterruptDisable();
 				USB_INT_Enable(USB_INT_RXOUTI);
 			}
@@ -126,13 +128,13 @@ bool USB_prepareTS(void)
 		}
 
 	// Silence warning
-	__builtin_unreachable();
+	//__builtin_unreachable();
 }
 
-void USB_Send(void)
+void USB_Send(Packet_t packet)
 {
 	State = S_Sending;
-	USBPos = 0;
+	current = packet;
 
 	Endpoint_SelectEndpoint(CDC_TX_EPADDR);
 	USB_INT_Disable(USB_INT_TXINI);
@@ -142,20 +144,29 @@ void USB_Send(void)
 	USB_INT_Enable(USB_INT_TXINI);
 }
 
-bool USB_Received(void)
+bool USB_Received(Packet_t *packet)
 {
-	_MemoryBarrier();
-	return (State == S_Received);
+	if(State == S_Received)
+	{
+		_MemoryBarrier();
+		//TODO: Mehrere Packete gleichzeitig?
+		packet->data = Buffer;
+		packet->len = current.len;
+		return true;	
+	} else {
+		return false;
+	}
 }
 
 void USB_EnableReceiver(void)
 {
-	USBPos = 0;
 	State = S_Ready;
 	if(RequestTS)
 	{
 		RequestTS = false;
 	} else {
+		ACCESS_ONCE(current.data) = Buffer;
+		ACCESS_ONCE(current.len) = 0;
 		Endpoint_SelectEndpoint(CDC_RX_EPADDR);
 		USB_INT_Enable(USB_INT_RXOUTI);
 	}
@@ -199,7 +210,7 @@ void EVENT_USB_Device_ConfigurationChanged(void)
 
 		if(!Endpoint_ConfigureEndpoint(CDC_RX_EPADDR, EP_TYPE_BULK, CDC_TXRX_EPSIZE, 1))
 			return;
-		USB_INT_Enable(USB_INT_RXOUTI);
+		// RXOUTI will be enabled by USB_EnableReceiver()
 
 		return;
 	case 2:
