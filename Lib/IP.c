@@ -29,7 +29,7 @@ typedef struct
 	uint8_t		data[];
 } ATTR_PACKED IP_Header_t;
 
-static uint8_t IP_WriteHeader(uint8_t packet[], IP_Protocol_t protocol, const IP_Address_t *destinationIP, uint8_t payloadLength)
+static uint8_t IP_WriteHeader(uint8_t packet[], IP_Protocol_t protocol, const IP_Address_t *destinationIP, uint16_t payloadLength)
 {
 	IP_Header_t *IP = (IP_Header_t *)packet;
 
