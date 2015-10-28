@@ -139,23 +139,24 @@ int main(void)
 	wdt_enable(WDTO_2S);
 	set_sleep_mode(SLEEP_MODE_IDLE);
 
-	USB_EnableReceiver();
-
 	GlobalInterruptEnable();
 
 	for (;;)
 	{
+#ifndef SPEEDTEST
 		time_t now = time(NULL);
 
 		if(now >= nextCalc)
 		{
 			calc(now);
 		}
+#endif
 		sleep_enable();
 
 
 		if(USB_isReady())
 		{
+#ifndef SPEEDTEST
 			// reloadtime reflects the time a new SNTP-Packet should be sent
 			if(now >= reloadtime)
 			{
@@ -175,7 +176,7 @@ int main(void)
 
 				}
 			}
-
+#endif
 			Packet_t receivedPacket;
 			if(USB_Received(&receivedPacket))
 			{

@@ -1,7 +1,5 @@
 #include "ARP.h"
 #include "Ethernet.h"
-//TODO: put IP Helper to seperate Header
-#include "IP.h"
 #include "helper.h"
 
 typedef struct
@@ -114,9 +112,9 @@ const MAC_Address_t* ARP_searchMAC(const IP_Address_t *IP)
 	return retVal;
 }
 
-uint8_t ARP_GenerateBroadcastRequest(uint8_t packet[], const IP_Address_t *destinationIP)
+uint8_t ARP_GenerateRequest(uint8_t packet[], const IP_Address_t *destinationIP)
 {
-	uint8_t offset = Ethernet_GenerateBroadcastReply(packet, ETHERTYPE_ARP);
+	uint8_t offset = Ethernet_GenerateBroadcast(packet, ETHERTYPE_ARP);
 
 	return offset + ARP_WriteHeader(packet + offset, ARP_OPERATION_REQUEST, &BroadcastMACAddress, destinationIP);
 }

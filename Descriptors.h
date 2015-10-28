@@ -6,7 +6,7 @@
 #define CDC_NOTIFICATION_EPADDR        (ENDPOINT_DIR_IN  | 1)
 #define CDC_TX_EPADDR                  (ENDPOINT_DIR_IN  | 3)
 #define CDC_RX_EPADDR                  (ENDPOINT_DIR_OUT | 4)
-#define CDC_NOTIFICATION_EPSIZE        8
+#define CDC_NOTIFICATION_EPSIZE        16
 #define CDC_TXRX_EPSIZE                64
 
 typedef struct

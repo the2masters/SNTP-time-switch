@@ -1,9 +1,6 @@
 #include "IP.h"
 #include "UDP.h"
 #include "ICMP.h"
-#include <avr/cpufunc.h>
-#include "helper.h"
-//TODO: Checksum sollte ausgegliedert werden
 #include "Ethernet.h"
 
 #define IP_HEADERLENGTHVERSION		(0x40 | sizeof(IP_Header_t)/4)
@@ -29,6 +26,33 @@ typedef struct
 	uint8_t		data[];
 } ATTR_PACKED IP_Header_t;
 
+void IP_ChecksumAdd(uint16_t *checksum, uint16_t word)
+{
+#if __GNUC__ < 5
+       *checksum += word;
+       if(*checksum < word)
+               (*checksum)++;
+#else
+       if(__builtin_uadd_overflow(*checksum, word, checksum))
+               (*checksum)++;
+#endif
+}
+
+uint16_t IP_Checksum(const void *data, uint16_t length)
+{
+	const uint16_t *Words = (const uint16_t *)data;
+	uint16_t length16 = length / 2;
+	uint16_t Checksum = 0;
+
+	while(length16--)
+		IP_ChecksumAdd(&Checksum, *(Words++));
+
+	if(length & 1)
+		IP_ChecksumAdd(&Checksum, *Words & CPU_TO_BE16(0xFF00));
+
+	return ~Checksum;
+}
+
 static uint8_t IP_WriteHeader(uint8_t packet[], IP_Protocol_t protocol, const IP_Address_t *destinationIP, uint16_t payloadLength)
 {
 	IP_Header_t *IP = (IP_Header_t *)packet;
@@ -43,7 +67,7 @@ static uint8_t IP_WriteHeader(uint8_t packet[], IP_Protocol_t protocol, const IP
 	IP->DestinationAddress	= *destinationIP;	// Can be an alias of IP->SourceAddress
 	IP->SourceAddress	= OwnIPAddress;
 	IP->Checksum		= 0;			// First set it to 0, then calculate correct checksum
-	IP->Checksum		= Ethernet_Checksum(IP, sizeof(IP_Header_t));
+	IP->Checksum		= IP_Checksum(IP, sizeof(IP_Header_t));
 
 	return sizeof(IP_Header_t);
 } 
@@ -69,7 +93,7 @@ bool IP_ProcessPacket(uint8_t packet[], uint16_t length)
 	switch (IP->Protocol)
 	{
 		case IP_PROTOCOL_ICMP:
-			reflect = ICMP_ProcessPacket(IP->data, length);
+			reflect = ICMP_ProcessPacket(IP->data);
 			break;
 		case IP_PROTOCOL_UDP:
 			reflect = UDP_ProcessPacket(IP->data, &IP->SourceAddress, length);
@@ -87,22 +111,22 @@ bool IP_ProcessPacket(uint8_t packet[], uint16_t length)
 	}
 }
 
-int8_t IP_GenerateRequest(uint8_t packet[], IP_Protocol_t protocol, const IP_Address_t *destinationIP, uint8_t payloadLength)
+int8_t IP_GenerateUnicast(uint8_t packet[], IP_Protocol_t protocol, const IP_Address_t *destinationIP, uint8_t payloadLength)
 {
 	const IP_Address_t *routerIP = destinationIP;
 	if(!(IP_compareNet(&OwnIPAddress, destinationIP)))
 		routerIP = &RouterIPAddress;
 
-	int8_t offset = Ethernet_GenerateRequest(packet, routerIP, ETHERTYPE_IPV4);
+	int8_t offset = Ethernet_GenerateUnicast(packet, routerIP, ETHERTYPE_IPV4);
 	if(offset <= 0)
 		return offset;
 
-	return offset + IP_WriteHeader(packet + offset, protocol, destinationIP, sizeof(IP_Header_t) + payloadLength);
+	return offset + IP_WriteHeader(packet + offset, protocol, destinationIP, payloadLength);
 }
 
-uint8_t IP_GenerateBroadcastReply(uint8_t packet[], IP_Protocol_t protocol, uint8_t payloadLength)
+uint8_t IP_GenerateBroadcast(uint8_t packet[], IP_Protocol_t protocol, uint8_t payloadLength)
 {
-	uint8_t offset = Ethernet_GenerateBroadcastReply(packet, ETHERTYPE_IPV4);
+	uint8_t offset = Ethernet_GenerateBroadcast(packet, ETHERTYPE_IPV4);
 
 	return offset + IP_WriteHeader(packet + offset, protocol, &BroadcastIPAddress, payloadLength);
 }

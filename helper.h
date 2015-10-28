@@ -9,6 +9,8 @@ extern "C"
 #define ARRAY_SIZE(a) (sizeof(a) / sizeof(a[0]))
 #define ACCESS_ONCE(x) (*(volatile typeof(x) *)&(x))
 
+#define ATTR_MAYBE_UNUSED __attribute__((unused))
+
 #include <stdint.h>
 typedef volatile uint8_t * HWADDR;
 

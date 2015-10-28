@@ -14,9 +14,9 @@
 #include "USB.h"
 
 static volatile bool RequestTS = false;
-static Packet_t current;
 uint8_t Buffer[ETHERNET_FRAME_SIZE];
 #define BufferEnd (Buffer + ARRAY_SIZE(Buffer))
+static Packet_t current = {.data = Buffer, .len = 0};
 
 static volatile enum {
 	S_Ready,
@@ -44,6 +44,32 @@ static void USB_SendNextFragment(void)
 		_MemoryBarrier();
 	}
 }
+
+static volatile uint8_t ConnectionStateIndex;
+static const __flash struct {
+	USB_Request_Header_t header;
+	uint32_t data[2];
+} ATTR_PACKED ConnectionState[] = {
+	{
+		.header = {
+			.bmRequestType = (REQDIR_DEVICETOHOST | REQTYPE_CLASS | REQREC_INTERFACE),
+			.bRequest      = CDC_NOTIF_ConnectionSpeedChange,
+			.wValue        = CPU_TO_LE16(0),
+			.wIndex        = CPU_TO_LE16(INTERFACE_ID_CDC_CCI),
+			.wLength       = CPU_TO_LE16(8),
+		},
+		.data = {CPU_TO_LE32(1000000), CPU_TO_LE32(1000000)}
+	},
+	{
+		.header = {
+			.bmRequestType = (REQDIR_DEVICETOHOST | REQTYPE_CLASS | REQREC_INTERFACE),
+			.bRequest      = CDC_NOTIF_NetworkConnection,
+			.wValue        = CPU_TO_LE16(1),
+			.wIndex        = CPU_TO_LE16(INTERFACE_ID_CDC_CCI),
+			.wLength       = CPU_TO_LE16(0),
+		}
+	}
+};
 
 void EVENT_USB_Endpoint_Interrupt(void)
 {
@@ -81,10 +107,6 @@ void EVENT_USB_Endpoint_Interrupt(void)
 
 			uint8_t readLength = Endpoint_BytesInEndpoint();
 
-			#if CDC_TXRX_EPSIZE < ETHERNET_FRAME_SIZE_MIN
-			#error CDC_TXRX_EPSIZE to small
-			#endif
-
 			if(readLength > BufferEnd - current.data)
 			{
 				readLength = BufferEnd - current.data;
@@ -107,6 +129,30 @@ void EVENT_USB_Endpoint_Interrupt(void)
 			}
 		}
 	}
+	if(Endpoint_HasEndpointInterrupted(CDC_NOTIFICATION_EPADDR))
+	{
+		Endpoint_SelectEndpoint(CDC_NOTIFICATION_EPADDR);
+		if(USB_INT_IsEnabled(USB_INT_TXINI))
+		{
+			USB_INT_Disable(USB_INT_TXINI);
+
+			uint8_t index = --ConnectionStateIndex;
+
+			_Static_assert(CDC_NOTIFICATION_EPSIZE >= sizeof(ConnectionState[0]), "CDC_NOTIFICATION_EPSIZE to small");
+
+			NONATOMIC_BLOCK(NONATOMIC_FORCEOFF)
+			{
+				__flash const uint8_t *data = (__flash const uint8_t *)&ConnectionState[index];
+				for(uint8_t i = (sizeof(USB_Request_Header_t) + le16_to_cpu(ConnectionState[index].header.wLength)); i; --i)
+					Endpoint_Write_8(*(data++));
+
+				Endpoint_ClearIN();
+			}
+
+			if(index)
+				USB_INT_Enable(USB_INT_TXINI);
+		}
+	}
 }
 
 bool USB_isReady(void)
@@ -127,8 +173,8 @@ bool USB_prepareTS(void)
 			return false;
 		}
 
-	// Silence warning
-	//__builtin_unreachable();
+	 //Silence warning
+	__builtin_unreachable();
 }
 
 void USB_Send(Packet_t packet)
@@ -203,6 +249,8 @@ void EVENT_USB_Device_ConfigurationChanged(void)
 	case 1:
 		if(!Endpoint_ConfigureEndpoint(CDC_NOTIFICATION_EPADDR, EP_TYPE_INTERRUPT, CDC_NOTIFICATION_EPSIZE, 1))
 			return;
+		ConnectionStateIndex = ARRAY_SIZE(ConnectionState);
+		USB_INT_Enable(USB_INT_TXINI);
 
 		if(!Endpoint_ConfigureEndpoint(CDC_TX_EPADDR, EP_TYPE_BULK, CDC_TXRX_EPSIZE, 1))
 			return;
@@ -210,7 +258,7 @@ void EVENT_USB_Device_ConfigurationChanged(void)
 
 		if(!Endpoint_ConfigureEndpoint(CDC_RX_EPADDR, EP_TYPE_BULK, CDC_TXRX_EPSIZE, 1))
 			return;
-		// RXOUTI will be enabled by USB_EnableReceiver()
+		USB_INT_Enable(USB_INT_RXOUTI);
 
 		return;
 	case 2:

@@ -2,9 +2,6 @@
 #include <time.h>
 #include <avr/io.h>
 #include <string.h>
-#include <avr/cpufunc.h>
-#include <util/atomic.h>
-#include "helper.h"
 #include "UDP.h"
 
 #define SNTP_VERSIONMODECLIENT	0x1B
@@ -67,45 +64,16 @@ time_t SNTP_ProcessPacket(uint8_t packet[], uint16_t length)
 	    (SNTP->TransmitTimestampSec == 0 && SNTP->TransmitTimestampSub == 0))
 		return 0;
 
-#ifndef SNTP_CALCULATE_ROUNDTRIP
 	TCNT1 = frac2timer(be32_to_cpu(SNTP->TransmitTimestampSub));
-	time_t neueZeit = be32_to_cpu(SNTP->TransmitTimestampSec) - NTP_OFFSET;
+	time_t newTime = be32_to_cpu(SNTP->TransmitTimestampSec) - NTP_OFFSET;
+	set_system_time(newTime);
 
-#else
-	uint32_t DestinationTimestampSub = TCNT1;
-	time_t DestinationTimestampSec = time(NULL);
-
-	if(SNTP->OriginateTimestampSec > DestinationTimestampSec ||
-	  (SNTP->OriginateTimestampSec == DestinationTimestampSec && SNTP->OriginateTimestampSub > DestinationTimestampSub) ||
-	   SNTP->OriginateTimestampSec < DestinationTimestampSec - MaxRoundTripSec)
-		return 0;
-
-	const uint16_t timerlength = (OCR1A + 1);
-	DestinationTimestampSub -= SNTP->OriginateTimestampSub;
-	while(DestinationTimestampSec != SNTP->OriginateTimestampSec)
-	{
-		DestinationTimestampSub += timerlength;
-		DestinationTimestampSec--;
-	}
-	DestinationTimestampSub /= 2; // half roundtrip delay
-
-	// Add it to TransmitTimestamp
-	time_t neueZeit = be32_to_cpu(SNTP->TransmitTimestampSec) - NTP_OFFSET;
-	DestinationTimestampSub += frac2timer(be32_to_cpu(SNTP->TransmitTimestampSub));
-	while(DestinationTimestampSub >= timerlength)
-	{
-		neueZeit++;
-		DestinationTimestampSub -= timerlength;
-	}
-	TCNT1 = (uint16_t)DestinationTimestampSub;
-#endif
-
-	return neueZeit;
+	return newTime;
 }
 
 int8_t SNTP_GenerateRequest(uint8_t packet[], const IP_Address_t *destinationIP, UDP_Port_t destinationPort)
 {
-	int8_t offset = UDP_GenerateRequest(packet, destinationIP, destinationPort, sizeof(SNTP_Header_t));
+	int8_t offset = UDP_GenerateUnicast(packet, destinationIP, destinationPort, sizeof(SNTP_Header_t));
 	if(offset < 0)
 		return offset;
 
@@ -113,10 +81,9 @@ int8_t SNTP_GenerateRequest(uint8_t packet[], const IP_Address_t *destinationIP,
 
 	memset(SNTP, 0, sizeof(SNTP_Header_t));
 	SNTP->VersionMode = SNTP_VERSIONMODECLIENT;
-
-#ifdef SNTP_CALCULATE_ROUNDTRIP
-	SNTP->TransmitTimestampSec = time(NULL);
-	SNTP->TransmitTimestampSub = TCNT1;
+#ifdef DEBUG
+	SNTP->TransmitTimestampSec = cpu_to_be32(time(NULL) + (uint32_t)NTP_OFFSET);
+	SNTP->TransmitTimestampSub = cpu_to_be32(TCNT1 * (uint32_t)68721);
 #endif
 
 	return offset + sizeof(SNTP_Header_t);

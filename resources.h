@@ -3,12 +3,14 @@
 
 #include <stdint.h>
 #include <time.h>
+#include <LUFA/Common/Common.h>
 
 #define CIDR		24
 #define IP_OWN		192, 168, 200, 40
 #define IP_ROUTER	192, 168, 200, 3
 #define IP_SNTP		192, 168, 200, 3
 #define MAC_OWN		0x02, 0x00, 0x00, 0x00, 0x00, 0x40
+#define UDP_PORT	65432
 
 #define ETHERNET_FRAME_SIZE	590
 #define ETHERNET_FRAME_SIZE_MIN	(14+28) // Ethernet ohne CRC: 14 + ARP/IP+UDP/IP+ICMP: 28
@@ -40,5 +42,13 @@ extern const IP_Address_t SNTPIPAddress;
 #endif
 
 #define NETMASK_BE CPU_TO_BE32(~(uint32_t)(_BV(32 - CIDR) - 1))
+
+bool IP_compareNet(const IP_Address_t *a, const IP_Address_t *b) ATTR_WARN_UNUSED_RESULT ATTR_NON_NULL_PTR_ARG(1, 2) ATTR_PURE;
+
+ATTR_WARN_UNUSED_RESULT ATTR_NON_NULL_PTR_ARG(1) ATTR_PURE ATTR_ALWAYS_INLINE
+static inline IP_Hostpart_t IP_getHost(const IP_Address_t *ip)
+{
+	return (IP_Hostpart_t)be32_to_cpu(*ip);
+}
 
 #endif //_RESOURCES_H_
