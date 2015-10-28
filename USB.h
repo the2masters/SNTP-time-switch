@@ -9,9 +9,7 @@ typedef struct
 	uint16_t len;
 } Packet_t;
 
-extern uint8_t Buffer[ETHERNET_FRAME_SIZE];
-
-bool USB_prepareTS(void) ATTR_WARN_UNUSED_RESULT;
+bool USB_prepareTS(Packet_t *packet) ATTR_WARN_UNUSED_RESULT;
 void USB_Send(Packet_t packet);
 bool USB_Received(Packet_t *packet) ATTR_WARN_UNUSED_RESULT ATTR_NON_NULL_PTR_ARG(1);
 void USB_EnableReceiver(void);

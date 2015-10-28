@@ -14,7 +14,7 @@
 #include "USB.h"
 
 static volatile bool RequestTS = false;
-uint8_t Buffer[ETHERNET_FRAME_SIZE];
+static uint8_t Buffer[ETHERNET_FRAME_SIZE];
 #define BufferEnd (Buffer + ARRAY_SIZE(Buffer))
 static Packet_t current = {.data = Buffer, .len = 0};
 
@@ -160,13 +160,14 @@ bool USB_isReady(void)
 	return (USB_DeviceState == DEVICE_STATE_Configured);
 }
 
-bool USB_prepareTS(void)
+bool USB_prepareTS(Packet_t *packet)
 {
 	ATOMIC_BLOCK(ATOMIC_FORCEON)
 		if(State == S_Ready)
 		{
 			Endpoint_SelectEndpoint(CDC_RX_EPADDR);
 			USB_INT_Disable(USB_INT_RXOUTI);
+			*packet = current;
 			return true;
 		} else {
 			RequestTS = true;

@@ -52,8 +52,6 @@ static inline void relay_set(Relay_t num, bool onoff)
 static time_t nextCalc = UINT32_MAX;	// Wait until first received SNTP-Packet
 static time_t reloadtime = 5;		// Start 2s after bootup sending SNTP-Packets
 
-static Packet_t sendPacket = {.data = Buffer};
-
 // This is mktime without changing it's arguments but recalculate dst each time
 // { struct tm tm = *time; tm.tm_isdst = -1; return mktime(&tm); }
 static time_t my_mktime(const struct tm *time)
@@ -160,7 +158,8 @@ int main(void)
 			// reloadtime reflects the time a new SNTP-Packet should be sent
 			if(now >= reloadtime)
 			{
-				if(USB_prepareTS())
+				Packet_t sendPacket;
+				if(USB_prepareTS(&sendPacket))
 				{
 					int8_t length = SNTP_GenerateRequest(sendPacket.data, &SNTPIPAddress, 123);
 					if(length < 0)
