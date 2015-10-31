@@ -75,6 +75,7 @@ ISR(TIMER1_CAPT_vect, ISR_NAKED)
 ISR(TIMER1_COMPA_vect, ISR_NAKED)
 #endif
 {
+	sleep_disable();
 	system_tick();
 	reti();
 }

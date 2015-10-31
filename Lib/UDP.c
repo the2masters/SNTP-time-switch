@@ -26,8 +26,8 @@ static uint8_t UDP_WriteHeader(uint8_t packet[], UDP_Port_t sourcePort, UDP_Port
 }
 
 
-ATTR_WARN_UNUSED_RESULT ATTR_NON_NULL_PTR_ARG(1, 2) ATTR_WEAK
-bool UDP_Callback_Request(uint8_t packet[] ATTR_MAYBE_UNUSED, const IP_Address_t *sourceIP ATTR_MAYBE_UNUSED, UDP_Port_t destinationPort ATTR_MAYBE_UNUSED, uint16_t length ATTR_MAYBE_UNUSED)
+ATTR_WARN_UNUSED_RESULT ATTR_NON_NULL_PTR_ARG(1) ATTR_WEAK
+bool UDP_Callback_Request(uint8_t packet[] ATTR_MAYBE_UNUSED, UDP_Port_t destinationPort ATTR_MAYBE_UNUSED, uint16_t length ATTR_MAYBE_UNUSED)
 {
 	return false;
 }
@@ -49,7 +49,7 @@ bool UDP_ProcessPacket(uint8_t packet[], const IP_Address_t *sourceIP, uint16_t 
 
 	if(UDP->SourcePort == UDP_PORT_AUTOMAT)		// This is a request
 	{
-		if(UDP_Callback_Request(UDP->data, sourceIP, be16_to_cpu(UDP->DestinationPort), length))
+		if(UDP_Callback_Request(UDP->data, be16_to_cpu(UDP->DestinationPort), length))
 		{
 			UDP_WriteHeader(packet, UDP->DestinationPort, UDP->SourcePort, length);
 			return true;

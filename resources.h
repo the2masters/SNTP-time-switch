@@ -15,6 +15,9 @@
 #define ETHERNET_FRAME_SIZE	590
 #define ETHERNET_FRAME_SIZE_MIN	(14+28) // Ethernet ohne CRC: 14 + ARP/IP+UDP/IP+ICMP: 28
 
+//TODO: Change to ONE_DAY
+#define SNTP_TimeBetweenQueries 30
+
 typedef uint32_t IP_Address_t;
 typedef uint16_t UDP_Port_t;
 //Damit mir LUFA RNDIS nicht dazwischen funkt

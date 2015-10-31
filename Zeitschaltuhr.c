@@ -4,74 +4,18 @@
 #include <avr/wdt.h>
 #include <avr/sleep.h>
 
-#include "helper.h"
 #include "timer1.h"
-#include "relay.h"
-#include "Lib/Ethernet.h"
-#include "Lib/SNTP.h"
-#include "USB.h"
 #include "resources.h"
-#include "Lib/ARP.h"
 
-// List of all installed Relais
-typedef enum {
-	Relay1,
-	Relay2,
-	RelayCount
-} Relay_t;
-
-// Extracted from curcuit board
-define_relay(Relay1, PORTC, _BV(5))
-define_relay(Relay2, PORTC, _BV(4))
+#include "rules.h"
 
 
-// Here you can select the times when a relay should be switched on
-typedef struct {
-	Relay_t relay;
-	int8_t starthour;
-	int8_t startmin;
-	int8_t stophour;
-	int8_t stopmin;
-	uint8_t day; // Bits: 7 .. 0: unused, saturday, friday, thursday, wednesday, tuesday, monday, sunday
-} Order_t;
-static const Order_t Orders[] = {
-	{ .relay = Relay1, .starthour = 20, .startmin =  41, .stophour = 24, .stopmin =  0, .day = _BV(MONDAY) | _BV(TUESDAY) | _BV(WEDNESDAY) | _BV(THURSDAY) | _BV(FRIDAY) | _BV(SATURDAY) | _BV(SUNDAY) },
-};
 
-static inline void relay_set(Relay_t num, bool onoff)
-{
-	switch(num)
-	{
-		case Relay1: Relay1_set(onoff); break;
-		case Relay2: Relay2_set(onoff); break;
-		case RelayCount:
-		default: __builtin_unreachable();
-	}
-}
 
-static time_t nextCalc = UINT32_MAX;	// Wait until first received SNTP-Packet
-static time_t reloadtime = 5;		// Start 2s after bootup sending SNTP-Packets
 
-// This is mktime without changing it's arguments but recalculate dst each time
-// { struct tm tm = *time; tm.tm_isdst = -1; return mktime(&tm); }
-static time_t my_mktime(const struct tm *time)
-{
-	// extract internals out of time.h implementation
-	extern int32_t __utc_offset;
-	extern int16_t (*__dst_ptr)(const time_t *, int32_t *);
 
-	// Convert localtime as UTC and correct it by UTC offset
-	time_t retVal = mk_gmtime(time) - __utc_offset;
-	// Additionally correct time by DST offset (if DST rules are configured)
-	// Orders scheduled in the lost hour in spring are executed one hour early
-	// Orders scheduled in the repeated hour in autumn are executed only one time
-	// after the time shift
-	if(__dst_ptr)
-		return retVal - __dst_ptr(&retVal, &__utc_offset);
-	else
-		return retVal;
-}
 
+/*
 // Calculate which relay should be switched on or off
 void calc(time_t time)
 {
@@ -114,20 +58,7 @@ void calc(time_t time)
 	{
 		relay_set(i, relayState[i]);
 	}
-}
-
-void UDP_Callback_Reply(uint8_t packet[], const IP_Address_t *sourceIP, UDP_Port_t sourcePort, uint16_t length)
-{
-	if(sourcePort == 123 && *sourceIP == SNTPIPAddress)
-	{
-		time_t now = SNTP_ProcessPacket(packet, length);
-		if(now == 0) return;
-
-		set_system_time(now);
-		reloadtime = now + ONE_HOUR;
-		nextCalc = 0;
-	}
-}
+}*/
 
 int main(void)
 {
@@ -141,50 +72,15 @@ int main(void)
 
 	for (;;)
 	{
-#ifndef SPEEDTEST
-		time_t now = time(NULL);
-
-		if(now >= nextCalc)
-		{
-			calc(now);
-		}
-#endif
+		// From now on, if anything happens in interrupt context which requires a new run of the main loop, it has to sleep_disable();
 		sleep_enable();
 
+		processNetworkPackets();
 
-		if(USB_isReady())
-		{
-#ifndef SPEEDTEST
-			// reloadtime reflects the time a new SNTP-Packet should be sent
-			if(now >= reloadtime)
-			{
-				Packet_t sendPacket;
-				if(USB_prepareTS(&sendPacket))
-				{
-					int8_t length = SNTP_GenerateRequest(sendPacket.data, &SNTPIPAddress, 123);
-					if(length < 0)
-					{
-						reloadtime = now + 1;	// Timeout 1s in case of missing ARP entry
-						sendPacket.len = -length;
-					} else {
-						reloadtime = now + 2;	// Timeout 2s in case of no answer
-						sendPacket.len = length;
-					}
+		checkRules();
 
-					USB_Send(sendPacket);
+		sendChangedRules();
 
-				}
-			}
-#endif
-			Packet_t receivedPacket;
-			if(USB_Received(&receivedPacket))
-			{
-				if(Ethernet_ProcessPacket(receivedPacket.data, receivedPacket.len))
-					USB_Send(receivedPacket);
-				else
-					USB_EnableReceiver();
-			}
-		}
 		sleep_cpu();
 		wdt_reset();
 	}
