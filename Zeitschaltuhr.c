@@ -17,6 +17,8 @@ int main(void)
 	wdt_enable(WDTO_2S);
 	set_sleep_mode(SLEEP_MODE_IDLE);
 
+	DDRC |= (_BV(4) | _BV(5));
+
 	GlobalInterruptEnable();
 
 	for (;;)

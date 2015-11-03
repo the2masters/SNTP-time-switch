@@ -7,20 +7,10 @@
 #include "USB.h"
 #include "Lib/Ethernet.h"
 #include "Lib/SNTP.h"
-#include "Lib/ASCII.h"
+#include "Lib/UDP.h"
 
-// TODO: RuleValue = int8_t, pvUnknown = -128
-#define RuleValueOffset 1
-#define boolToRuleValue(val) (val + RuleValueOffset)
-#define RuleValueToBool(val) (val - RuleValueOffset)
-
-typedef enum {
-	pvUnknown = 0,
-	pvOff = boolToRuleValue(false),
-	pvOn = boolToRuleValue(true),
-	pvOffChanged = -pvOff,
-	pvOnChanged = -pvOn,
-} ruleValue_t;
+typedef int8_t ruleValue_t;
+#define rvUnknown ((ruleValue_t)-128)
 
 typedef enum {
 	ptLogic,
@@ -64,14 +54,11 @@ typedef enum {
 } LogicType_t;
 
 typedef enum {
-	TriggerEdge = _BV(0),
-	TriggerInvert = _BV(1),
+	TriggerRising = _BV(0),
+	TriggerFalling = _BV(1),
 	TriggerMonoflopRetrigger = _BV(2),
 
-	TriggerRising = TriggerEdge,
-	TriggerIsTrue = 0,
-	TriggerFalling = TriggerEdge ^ TriggerInvert,
-	TriggerIsFalse = TriggerInvert,
+	TriggerBoth = TriggerRising | TriggerFalling,
 } TriggerType_t;
 
 typedef enum RuleNames {
@@ -100,7 +87,8 @@ typedef enum RuleNames {
 typedef struct {
 	ruleType_t		type;
 	ruleNum_t		dependIndex;
-	UDP_Port_t		networkPort;	// For normal rules this is the sourcePort of data packets. For remote rules this is the destination Port.
+	UDP_Port_t		networkPort;	// For normal rules this is the sourcePort of data packets. 
+						// For remote rules this is the destination Port.
 	union {
 		IP_Address_t	IP;
 		struct {
@@ -139,9 +127,9 @@ static const __flash ruleData_t ruleData[] = {
 // Global rules
 	[SystemError]		= {.type = ptLogic, .data.logic = {.type = LogicForceOff }, .networkPort = 0},		// Should be ptSystemError
 	[TimeOK]		= {.type = ptSNTP, .data.IP = CPU_TO_BE32(0xC0A8C803), .networkPort = 123},
-	[Daylight]		= {.type = ptTimeSwitch, .dependIndex = TimeOK, .data.time = {.wdays = 0b01111111, .starthour = 12, .startmin = 0, .stophour = 13, .stopmin = 0}},	// Should be ptDaylight
-	[SunriseTrigger]	= {.type = ptTrigger, .dependIndex = Daylight, .data.trigger = {.type = TriggerRising}},
-	[SunsetTrigger]		= {.type = ptTrigger, .dependIndex = Daylight, .data.trigger = {.type = TriggerFalling}},
+	[Daylight]		= {.type = ptTimeSwitch, .dependIndex = TimeOK, .data.time = {.wdays = 0b01111111, .starthour = 0, .startmin = 9, .stophour = 0, .stopmin = 10}},	// Should be ptDaylight
+	[SunriseTrigger]	= {.type = ptTrigger, .dependIndex = Daylight, .data.trigger = {.type = TriggerRising, .sec = 3}},
+	[SunsetTrigger]		= {.type = ptTrigger, .dependIndex = Daylight, .data.trigger = {.type = TriggerFalling, .sec = 4}},
 
 // Inputs
 	[Shutter1KeyUP]		= {.type = ptLogic, .data.logic = {.type = LogicForceOff }},		// Should be ptInput
@@ -150,7 +138,7 @@ static const __flash ruleData_t ruleData[] = {
 // Shutter 1
 	[Shutter1Error]		= {.type = ptLogic, .dependIndex = Shutter1KeyUP, .data.logic = {.second = Shutter1KeyDown, .third = SunriseTrigger, .fourth = SunsetTrigger, .type = LogicANDAB ^ LogicANDCD ^ LogicORQ12}}, // (A ^ B) v (C ^ D)
 	[Shutter1NoManualControl] = {.type = ptLogic, .dependIndex = Shutter1KeyUP, .data.logic = {.second = Shutter1KeyDown, .third = SunriseTrigger, .fourth = SunsetTrigger, .type = LogicINV_A ^ LogicINV_B ^ LogicANDAB ^ LogicORCD ^ LogicANDQ12}}, // (/A ^ /B) ^ (C v D)
-	[Shutter1DriveTimeout]	= {.type = ptTrigger, .dependIndex = Shutter1NoManualControl, .data.trigger = {.type = TriggerRising, .min = 2 }},
+	[Shutter1DriveTimeout]	= {.type = ptTrigger, .dependIndex = Shutter1NoManualControl, .data.trigger = {.type = TriggerRising, .min = 1 }},
 	[Shutter1Direction]	= {.type = ptLogic, .dependIndex = Daylight, .data.logic = {.second = Shutter1DriveTimeout, .type = LogicANDAB}},
 
 // Outputs
@@ -158,7 +146,7 @@ static const __flash ruleData_t ruleData[] = {
 	[Shutter1RelayOverride]	= {.type = ptRelay, .dependIndex = Shutter1DriveTimeout, .data.hw = {.port = &PORTC, .bitValue = _BV(5)}},	// K1
 };
 
-static ruleState_t ruleState[ARRAY_SIZE(ruleData)] = {{0}};
+static ruleState_t ruleState[] = {[0 ... ARRAY_SIZE(ruleData)-1] = {.timer = 5, .value = rvUnknown}};
 
 _Static_assert(sizeof(ruleData->data) == 4, "data field grew over 4 bytes");
 
@@ -203,21 +191,21 @@ static time_t getMidnight(struct tm *tm ATTR_MAYBE_UNUSED)
 	return _nextMidnight;
 }
 
-static bool checkDependency(ruleNum_t dependIndex, ruleNum_t noDependIndex, bool *value, bool *changed)
+static bool checkDependency(ruleNum_t dependIndex, ruleValue_t *value, bool *changed)
 {
 	if(!dependIndex)
 		return false;
 
 	ruleValue_t dependency = ruleState[dependIndex].value;
-	if(dependency == pvUnknown)
+	if(dependency == rvUnknown)
 		return true;
 
 	if(dependency < 0)
 	{
 		*changed = true;
-		dependency = -dependency;
+		dependency = ~dependency;
 	}
-	*value = RuleValueToBool(dependency);
+	*value = dependency;
 
 	return false;
 }
@@ -228,24 +216,24 @@ void checkRules(void)
 
 	for(ruleNum_t rule = 0; rule < ARRAY_SIZE(ruleData); rule++)
 	{
-		bool ruleValue = false;
+		ruleValue_t ruleValue = false;
 		bool dependChanged = false;
 
 		// Check if dependency is in state unknown, otherwise set ruleValue to dependencyValue
-		if(checkDependency(ruleData[rule].dependIndex, rule, &ruleValue, &dependChanged))
+		if(checkDependency(ruleData[rule].dependIndex, &ruleValue, &dependChanged))
 			continue;
 
 		// For ptLogic type we need to check more dependencies for unknown and changed values.
-		bool dependValueB = false, dependValueC = false, dependValueD = false;
+		ruleValue_t dependValueB = false, dependValueC = false, dependValueD = false;
 		if(ruleData[rule].type == ptLogic)
 		{
-			if(checkDependency(ruleData[rule].data.logic.second, 0, &dependValueB, &dependChanged))
+			if(checkDependency(ruleData[rule].data.logic.second, &dependValueB, &dependChanged))
 				continue;
 
-			if(checkDependency(ruleData[rule].data.logic.third, 0, &dependValueC, &dependChanged))
+			if(checkDependency(ruleData[rule].data.logic.third, &dependValueC, &dependChanged))
 				continue;
 
-			if(checkDependency(ruleData[rule].data.logic.fourth, 0, &dependValueD, &dependChanged))
+			if(checkDependency(ruleData[rule].data.logic.fourth, &dependValueD, &dependChanged))
 				continue;
 		}
 
@@ -254,13 +242,10 @@ void checkRules(void)
 		if(!dependChanged && now < ruleState[rule].timer)
 			continue;
 
-		// Set few defaults for following rules
-		bool resultUnknown = false;
-		time_t newTimer = timerOff;
-
 		switch(ruleData[rule].type)
 		{
-			case ptLogic: ;
+			case ptLogic:
+			{
 				LogicType_t logictype = ruleData[rule].data.logic.type;
 
 				if((logictype & LogicINV_A) == LogicINV_A)
@@ -292,24 +277,30 @@ void checkRules(void)
 
 				if((logictype & LogicINV_Q) == LogicINV_Q)
 					ruleValue = !ruleValue;
-				break;
+
+				ruleState[rule].timer = timerOff;
+			} break;
 
 			case ptRelay:
+			{
 				if(ruleValue)
 					*ruleData[rule].data.hw.port |= ruleData[rule].data.hw.bitValue;
 				else
 					*ruleData[rule].data.hw.port &= ~ruleData[rule].data.hw.bitValue;
 				// Force a delay between each switching relay
 				_delay_ms(50);
-				break;
 
-			case ptTimeSwitch: ;
+				ruleState[rule].timer = timerOff;
+			} break;
+
+			case ptTimeSwitch:
+			{
 				struct tm *tm = getStructTM(now);
 
 				if((ruleData[rule].data.time.wdays & _BV(tm->tm_wday)) == 0)
 				{
 					ruleValue = false;
-					newTimer = getMidnight(tm);
+					ruleState[rule].timer = getMidnight(tm);
 					break;
 				}
 
@@ -317,76 +308,94 @@ void checkRules(void)
 				if(now < starttime)
 				{
 					ruleValue = false;
-					newTimer = starttime;
+					ruleState[rule].timer = starttime;
 				} else {
 	                                time_t stoptime = calculateTimestamp(tm, ruleData[rule].data.time.stophour, ruleData[rule].data.time.stopmin);
 					if(now < stoptime)
 					{
 						ruleValue = true;
-						newTimer = stoptime;
+						ruleState[rule].timer = stoptime;
 					} else {
 						ruleValue = false;
-						newTimer = getMidnight(tm);
+						ruleState[rule].timer = getMidnight(tm);
 					}
 				}
-				break;
+			} break;
 
-			case ptTrigger: ;
-#warning Support Other TriggerTypes
-				if(ruleState[rule].timer == timerOff)	// Not retriggerable
+			case ptTrigger:
+			{
+				TriggerType_t triggertype = ruleData[rule].data.trigger.type;
+
+				if(dependChanged && (((triggertype & TriggerMonoflopRetrigger) == TriggerMonoflopRetrigger) || ruleState[rule].timer == timerOff))
 				{
-					if(dependChanged && ruleValue)	// positive edge triggered
+					if((((triggertype & TriggerRising) == TriggerRising) && ruleValue) ||
+					   (((triggertype & TriggerFalling) == TriggerFalling) && !ruleValue))
 					{
-						newTimer = now + (ruleData[rule].data.trigger.hour * (int16_t)60 + ruleData[rule].data.trigger.min) * (int32_t)60 + ruleData[rule].data.trigger.sec;
-						//ruleValue is true
+						ruleValue = true;
+						ruleState[rule].timer = now + (ruleData[rule].data.trigger.hour * (uint16_t)60 + ruleData[rule].data.trigger.min) * (uint32_t)60 + ruleData[rule].data.trigger.sec;
+					} else {
+						ruleValue = false;
 					}
 				}
-				else if(now < ruleState[rule].timer)
-				{	// Stay on even if dependency switched off
-					ruleValue = true;
-				} else {
-					ruleValue = false;
-					newTimer = timerOff;
+				else if(ruleState[rule].timer != timerOff)
+				{
+					if(now < ruleState[rule].timer)
+					{	// Stay on even if dependency switched off
+						ruleValue = true;
+					} else {
+						ruleValue = false;
+						ruleState[rule].timer = timerOff;
+					}
 				}
+			} break;
 
 			case ptSNTP:
 			case ptRemote:
-				resultUnknown = true;
-
+			{
 				Packet_t sendPacket;
 				// Check if USB Queue is free
 				if(USB_isReady() && USB_prepareTS(&sendPacket))
 				{
 					int8_t length;
-
+					const IP_Address_t ipCopy = ruleData[rule].data.IP;
 					if(ruleData[rule].type == ptSNTP)
-						length = SNTP_GenerateRequest(sendPacket.data, &ruleData[rule].data.IP, ruleData[rule].dependIndex);
-					else // typ = ptRemote
-						length = ASCII_GenerateRequest(sendPacket.data, &ruleData[rule].data.IP, ruleData[rule].dependIndex);
-
-					if(length < 0)
 					{
-						newTimer = now + 1;	// Timeout 1s in case of missing ARP entry
-						sendPacket.len = -length;
-					} else {
-						newTimer = now + 2;	// Timeout 2s in case of no answer
+						length = SNTP_GenerateRequest(sendPacket.data, &ipCopy, ruleData[rule].networkPort);
+					} else { // ptRemote
+						length = UDP_GenerateUnicast(sendPacket.data, &ipCopy, ruleData[rule].networkPort, sizeof(ruleValue_t));
+						if(length > 0)
+						{
+							ruleValue_t *packetValue = (ruleValue_t *)(sendPacket.data + length);
+							*packetValue = rvUnknown;
+							length += sizeof(ruleValue_t);
+						}
+					}
+					if(length > 0)
+					{
 						sendPacket.len = length;
+						ruleState[rule].timer = now + 2;	// Timeout 2s in case of no answer;
+					} else {
+						sendPacket.len = -length;
+						ruleState[rule].timer =  now + 1;	// Timeout 1s in case of missing ARP entry
 					}
 					USB_Send(sendPacket);
-				} else { // USB queue blocked, try again on next run
-					newTimer = 0;
 				}
-				break;
+				ruleValue = rvUnknown;
+			} break;
+
+			default:
+			{
+				ruleValue = rvUnknown;
+				ruleState[rule].timer = timerOff;
+			} break;
 		}
-		ruleState[rule].timer = newTimer;
-		if(resultUnknown)
+
+		if(ruleValue == rvUnknown)
 			continue;
 
-		ruleValue_t newValue = boolToRuleValue(ruleValue);
-
-		// Did the result of our rule change? Then set changeflag (inverted value)
-		if(ruleState[rule].value != newValue)
-			ruleState[rule].value = -newValue;
+		// Did the result of our rule change? Then set changeflag (ones' complement)
+		if(ruleState[rule].value != ruleValue)
+			ruleState[rule].value = ~ruleValue;
 	}
 }
 
@@ -395,13 +404,27 @@ void sendChangedRules(void)
 {
 	for(ruleNum_t rule = 0; rule < ARRAY_SIZE(ruleData); rule++)
 	{
-		Packet_t sendPacket;
-		if(ruleState[rule].value < pvUnknown && USB_isReady() && USB_prepareTS(&sendPacket))
-		{	// Reset changeflag
-			ruleState[rule].value = -ruleState[rule].value;
+		if(ruleState[rule].value != rvUnknown && ruleState[rule].value < 0)
+		{
+UDP_Port_t port = ruleData[rule].networkPort ? : rule;
+			if(ruleData[rule].type >= 0 /*&& ruleData[rule].networkPort*/)
+			{
+				Packet_t sendPacket;
+				if(USB_isReady() && USB_prepareTS(&sendPacket))
+				{
+					ruleState[rule].value = ~ruleState[rule].value;
 
-			sendPacket.len = ASCII_GenerateBroadcast(sendPacket.data, rule, RuleValueToBool(ruleState[rule].value));
-			USB_Send(sendPacket);
+					sendPacket.len = UDP_GenerateBroadcast(sendPacket.data, /*ruleData[rule].networkPort*/ port, sizeof(ruleValue_t));
+					ruleValue_t *packetValue = (ruleValue_t *)(sendPacket.data + sendPacket.len);
+					*packetValue = ruleState[rule].value;
+
+					sendPacket.len += sizeof(ruleValue_t);
+					USB_Send(sendPacket);
+				}
+				// else: could not send packet, try again next round
+			} else {
+				ruleState[rule].value = ~ruleState[rule].value;
+			}
 		}
 	}
 }
@@ -423,10 +446,22 @@ void processNetworkPackets(void)
 ATTR_WARN_UNUSED_RESULT ATTR_NON_NULL_PTR_ARG(1)
 bool UDP_Callback_Request(uint8_t packet[], UDP_Port_t destinationPort, uint16_t length)
 {
-	// If rules are in changed state (value < pvUnknown) they will be later broadcasted
-	if(destinationPort < ARRAY_SIZE(ruleData) && ruleState[destinationPort].value > pvUnknown)
+	ruleValue_t *packetValue = (ruleValue_t *)packet;
+
+	if(length != sizeof(ruleValue_t) || *packetValue != rvUnknown)
+		return false;
+
+	for(ruleNum_t rule = 0; rule < ARRAY_SIZE(ruleData); rule++)
 	{
-		return ASCII_ProcessRequest(packet, length, RuleValueToBool(ruleState[destinationPort].value));
+		if(ruleData[rule].type < 0) continue;
+		if(ruleData[rule].networkPort != destinationPort) continue;
+		// Now we know the packet is for the current rule
+
+		// Don't send an answer, if value is changed (will be send later automatically) or is unknown
+		if(ruleState[destinationPort].value < 0) break;
+
+		*packetValue = ruleState[destinationPort].value;
+		return true;
 	}
 	return false;
 }
@@ -437,7 +472,7 @@ void UDP_Callback_Reply(uint8_t packet[], const IP_Address_t *sourceIP, UDP_Port
 	for(ruleNum_t rule = 0; rule < ARRAY_SIZE(ruleData); rule++)
 	{
 		if(ruleData[rule].type >= 0) continue;
-		if(ruleData[rule].dependIndex != sourcePort) continue;
+		if(ruleData[rule].networkPort != sourcePort) continue;
 		if(ruleData[rule].data.IP != *sourceIP) continue;
 
 		// Now we know the packet is for the current rule
@@ -447,21 +482,22 @@ void UDP_Callback_Reply(uint8_t packet[], const IP_Address_t *sourceIP, UDP_Port
 			time_t newTime = SNTP_ProcessPacket(packet, length);
 			if(!newTime) break;
 
-			newState = pvOn;
+			newState = true;
 			ruleState[rule].timer = newTime + SNTP_TimeBetweenQueries;
 		} else { // ptRemote
-			bool retVal;
-			if(!ASCII_ProcessReply(packet, length, &retVal))
+			ruleValue_t *packetValue = (ruleValue_t *)packet;
+
+			if(length != sizeof(ruleValue_t) || *packetValue < 0)
 				break;
 
-			newState = boolToRuleValue(retVal);
+			newState = *packetValue;
 			ruleState[rule].timer = timerOff;
 		}
 		if(ruleState[rule].value != newState)
 		{
-			ruleState[rule].value = -newState;
+			ruleState[rule].value = ~newState;
 		}
-		// Dont check this packet agains later rules
+		// Dont check this packet against later rules
 		break;
 	}
 }
