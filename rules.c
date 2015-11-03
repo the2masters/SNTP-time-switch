@@ -1,3 +1,4 @@
+#include <util/delay.h>
 #include <stdint.h>
 #include <stdbool.h>
 #include "rules.h"
@@ -25,61 +26,83 @@ typedef enum {
 typedef enum {
 	ptLogic,
 	ptRelay,
+	ptInput,
 	ptTimeSwitch,
-	ptMonoflop,
-	ptSunrise,
-	ptSunset,
+	ptTrigger,
+	ptNight,
 	ptSNTP = -1,	// negative = remote dependency
 	ptRemote = -2
 } ruleType_t;
 
 typedef enum {
-	LogicXOR = _BV(6),
-	LogicINV_E = _BV(5),
-	LogicINV_D = _BV(4),
-	LogicINV_C = _BV(3),
-	LogicINV_B = _BV(2),
-	LogicINV_A = _BV(1),
-	LogicINV_Q = _BV(0),
+	LogicXOR = _BV(7),
+	LogicINV_Q = _BV(6),
+	LogicINV_Q2 = _BV(5),
+	LogicINV_Q1 = _BV(4),
+	LogicINV_D = _BV(3),
+	LogicINV_C = _BV(2),
+	LogicINV_B = _BV(1),
+	LogicINV_A = _BV(0),
 
-	LogicRepeat = 0,
-	LogicNOT = LogicINV_Q,
-	LogicForceOn = LogicINV_E,
-	LogicForceOff = LogicForceOn ^ LogicINV_Q,
-	LogicOR = 0,
-	LogicNOR = LogicOR ^ LogicINV_Q,
-	LogicAND = LogicINV_A ^ LogicINV_B ^ LogicINV_C ^ LogicINV_D ^ LogicINV_E ^ LogicINV_Q,
-	LogicNAND = LogicAND ^ LogicINV_Q,
-	LogicXNOR = LogicXOR ^ LogicINV_Q,
+	LogicORAB = 0,
+	LogicORCD = 0,
+	LogicORQ12 = 0,
+	LogicANDAB = LogicINV_A ^ LogicINV_B ^ LogicINV_Q1,
+	LogicANDCD = LogicINV_C ^ LogicINV_D ^ LogicINV_Q2,
+	LogicANDQ12 = LogicINV_Q1 ^ LogicINV_Q2 ^ LogicINV_Q,
+	// Helper for 4 inputs
+	LogicORABCD = LogicORAB ^ LogicORCD ^ LogicORQ12,
+	LogicANDABCD = LogicANDAB ^ LogicANDCD ^ LogicANDQ12,
+	// Helper for 3 inputs (input D = 0)
+	LogicORABC = LogicORABCD,
+	LogicANDABC = LogicINV_D ^ LogicANDABCD,
+	// Helper for 2 inputs: LogicORAB, LogicANDAB
+	// Helper for 1 input (input B = 0)
+	LogicRepeat = LogicORAB,
+	LogicNOT = LogicRepeat ^ LogicINV_Q,
+	LogicForceOff = LogicANDAB,
+	LogicForceOn = LogicForceOff ^ LogicINV_Q,
 } LogicType_t;
+
+typedef enum {
+	TriggerEdge = _BV(0),
+	TriggerInvert = _BV(1),
+	TriggerMonoflopRetrigger = _BV(2),
+
+	TriggerRising = TriggerEdge,
+	TriggerIsTrue = 0,
+	TriggerFalling = TriggerEdge ^ TriggerInvert,
+	TriggerIsFalse = TriggerInvert,
+} TriggerType_t;
 
 typedef struct {
 	ruleType_t		type;
-	ruleNum_t		dependIndex; // In case of negativ typ this is the port on the remote machine
+	ruleNum_t		dependIndex; // In case of negativ type this is the port on the remote machine
 	union {
 		IP_Address_t	IP;
 		struct {
-			bool	backward;
-			int8_t	hour;
-			int8_t	min;
-			int8_t	wdays;
-		} time;
+			uint8_t	wdays;
+			unsigned starthour : 6;
+			unsigned startmin  : 6;
+			unsigned stophour  : 6;
+			unsigned stopmin   : 6;
+		} ATTR_PACKED time;
 		struct {
-			bool	minmaxtime;	// false: minimum time, true: maximum time
-			int8_t	hour;
-			int8_t	min;
-			int8_t	sec;
-		} monoflop;
+			TriggerType_t type;
+			uint8_t	hour;
+			uint8_t	min;
+			uint8_t	sec;
+		} ATTR_PACKED trigger;
 		struct {
 			ruleNum_t second;	// Zero means no argument
 			ruleNum_t third;
 			ruleNum_t fourth;
 			LogicType_t type;
-		} logic;
+		} ATTR_PACKED logic;
 		struct {
 			HWADDR port;		// Something like &PORTC
 			uint8_t bitValue;	// Something like _BV(PORTC1)
-		} hw;
+		} ATTR_PACKED hw;
 	} data;
 } ruleData_t;
 
@@ -91,13 +114,21 @@ typedef struct {
 
 static const __flash ruleData_t ruleData[] = {
 	[0] = {.type = ptSNTP, .dependIndex = 123, .data.IP = CPU_TO_BE32(0xC0A8C801)},
-	[1] = {.type = ptRemote, .dependIndex = 1, .data.IP = CPU_TO_BE32(0xC0A8C802)},
-	[2] = {.type = ptTimeSwitch, .dependIndex = 0, .data.time = {.backward = false, .hour = 12, .min = 0, .wdays = 0b01111111}},
-	[3] = {.type = ptRelay, .dependIndex = 3, .data.hw = {.port = &PORTC, .bitValue = _BV(5)}},
+	[1] = {.type = ptTimeSwitch, .dependIndex = 0, .data.time = {.wdays = 0b01111111, .starthour = 12, .startmin = 0, .stophour = 13, .stopmin = 0}},	// Should be ptNight
+	[2] = {.type = ptTrigger, .dependIndex = 1, .data.trigger = {.type = TriggerRising}},
+	[3] = {.type = ptTrigger, .dependIndex = 1, .data.trigger = {.type = TriggerFalling}},
+	[4] = {.type = ptLogic, .dependIndex = 4, .data.logic = {.type = LogicForceOff }},		// Should be ptInput
+	[5] = {.type = ptLogic, .dependIndex = 5, .data.logic = {.type = LogicForceOff }},		// Should be ptInput
+	[6] = {.type = ptLogic, .dependIndex = 2, .data.logic = {.second = 3, .third = 4, .fourth = 5, .type = LogicORAB ^ LogicINV_C ^ LogicINV_D ^ LogicANDCD ^ LogicANDQ12}}, // (A v B) ^ (/C ^ /D)
+	[7] = {.type = ptTrigger, .dependIndex = 6, .data.trigger = {.type = TriggerRising, .min = 2 }},
+	[8] = {.type = ptLogic, .dependIndex = 1, .data.logic = {.second = 7, .type = LogicANDAB}},
+	[9] = {.type = ptRelay, .dependIndex = 8, .data.hw = {.port = &PORTC, .bitValue = _BV(4)}},	// K2
+	[10] = {.type = ptRelay, .dependIndex = 7, .data.hw = {.port = &PORTC, .bitValue = _BV(5)}},	// K1
 };
 
 static ruleState_t ruleState[ARRAY_SIZE(ruleData)] = {{0}};
 
+_Static_assert(sizeof(ruleData->data) == 4, "data field grew over 4 bytes");
 
 static time_t calculateTimestamp(struct tm *time, int8_t hour, int8_t min)
 {
@@ -173,19 +204,17 @@ void checkRules(void)
 			continue;
 
 		// For ptLogic type we need to check more dependencies for unknown and changed values.
-		bool ptlogicValues[4] = {0};	// Save State of input B - E
+		bool dependValueB = false, dependValueC = false, dependValueD = false;
 		if(ruleData[rule].type == ptLogic)
 		{
-			if(checkDependency(ruleData[rule].data.logic.second, 0, &ptlogicValues[0], &dependChanged))
+			if(checkDependency(ruleData[rule].data.logic.second, 0, &dependValueB, &dependChanged))
 				continue;
 
-			if(checkDependency(ruleData[rule].data.logic.third, 0, &ptlogicValues[1], &dependChanged))
+			if(checkDependency(ruleData[rule].data.logic.third, 0, &dependValueC, &dependChanged))
 				continue;
 
-			if(checkDependency(ruleData[rule].data.logic.fourth, 0, &ptlogicValues[2], &dependChanged))
+			if(checkDependency(ruleData[rule].data.logic.fourth, 0, &dependValueD, &dependChanged))
 				continue;
-
-			// Fixed input E is always false
 		}
 
 
@@ -205,19 +234,29 @@ void checkRules(void)
 				if((logictype & LogicINV_A) == LogicINV_A)
 					ruleValue = !ruleValue;
 				if((logictype & LogicINV_B) == LogicINV_B)
-					ptlogicValues[0] = !ptlogicValues[0];
+					dependValueB = !dependValueB;
 				if((logictype & LogicINV_C) == LogicINV_C)
-					ptlogicValues[1] = !ptlogicValues[1];
+					dependValueC = !dependValueC;
 				if((logictype & LogicINV_D) == LogicINV_D)
-					ptlogicValues[2] = !ptlogicValues[2];
-				if((logictype & LogicINV_E) == LogicINV_E)
-					ptlogicValues[3] = !ptlogicValues[3];
+					dependValueD = !dependValueD;
 
+				bool Q1, Q2;
 				if((logictype & LogicXOR) == LogicXOR)
-					ruleValue ^= ptlogicValues[0] ^ ptlogicValues[1] ^ ptlogicValues[2] ^ ptlogicValues[3];
+				{
+					Q1 = ruleValue ^ dependValueB;
+					Q2 = dependValueC ^ dependValueD;
+				} else {
+					Q1 = ruleValue | dependValueB;
+					Q2 = dependValueC | dependValueD;
+				}
+				if((logictype & LogicINV_Q1) == LogicINV_Q1)
+					Q1 = !Q1;
+				if((logictype & LogicINV_Q2) == LogicINV_Q2)
+					Q2 = !Q2;
+				if((logictype & LogicXOR) == LogicXOR)
+					ruleValue = Q1 ^ Q2;
 				else
-					ruleValue |= ptlogicValues[0] | ptlogicValues[1] | ptlogicValues[2] | ptlogicValues[3];
-
+					ruleValue = Q1 | Q2;
 				if((logictype & LogicINV_Q) == LogicINV_Q)
 					ruleValue = !ruleValue;
 				break;
@@ -227,6 +266,7 @@ void checkRules(void)
 					*ruleData[rule].data.hw.port |= ruleData[rule].data.hw.bitValue;
 				else
 					*ruleData[rule].data.hw.port &= ~ruleData[rule].data.hw.bitValue;
+				_delay_ms(50);
 				break;
 
 			case ptTimeSwitch: ;
@@ -239,24 +279,32 @@ void checkRules(void)
 					break;
 				}
 
-				ruleValue = ruleData[rule].data.time.backward;
-				time_t switchtime = calculateTimestamp(tm, ruleData[rule].data.time.hour, ruleData[rule].data.time.min);
-
-				if(now < switchtime)
+				time_t starttime = calculateTimestamp(tm, ruleData[rule].data.time.starthour, ruleData[rule].data.time.startmin);
+				if(now < starttime)
 				{
-					newTimer = switchtime;
+					ruleValue = false;
+					newTimer = starttime;
 				} else {
-					newTimer = getMidnight(tm);
-					ruleValue = !ruleValue;
+	                                time_t stoptime = calculateTimestamp(tm, ruleData[rule].data.time.stophour, ruleData[rule].data.time.stopmin);
+					if(now < stoptime)
+					{
+						ruleValue = true;
+						newTimer = stoptime;
+					} else {
+						ruleValue = false;
+						newTimer = getMidnight(tm);
+					}
 				}
 				break;
 
-			case ptMonoflop:
-				if(ruleState[rule].timer == timerOff)
+			case ptTrigger: ;
+#warning Support Other TriggerTypes
+				if(ruleState[rule].timer == timerOff)	// Not retriggerable
 				{
-					if(dependChanged && ruleValue)
+					if(dependChanged && ruleValue)	// positive edge triggered
 					{
-						newTimer = now + (ruleData[rule].data.monoflop.hour * (int16_t)60 + ruleData[rule].data.monoflop.min) * (int32_t)60 + ruleData[rule].data.monoflop.sec;
+						newTimer = now + (ruleData[rule].data.trigger.hour * (int16_t)60 + ruleData[rule].data.trigger.min) * (int32_t)60 + ruleData[rule].data.trigger.sec;
+						//ruleValue is true
 					}
 				}
 				else if(now < ruleState[rule].timer)
