@@ -9,8 +9,7 @@
 #include "Lib/SNTP.h"
 #include "Lib/ASCII.h"
 
-typedef uint8_t ruleNum_t;
-
+// TODO: RuleValue = int8_t, pvUnknown = -128
 #define RuleValueOffset 1
 #define boolToRuleValue(val) (val + RuleValueOffset)
 #define RuleValueToBool(val) (val - RuleValueOffset)
@@ -29,8 +28,8 @@ typedef enum {
 	ptInput,
 	ptTimeSwitch,
 	ptTrigger,
-	ptNight,
-	ptSNTP = -1,	// negative = remote dependency
+	ptDaylight,
+	ptSNTP = -1,	// negative = remote
 	ptRemote = -2
 } ruleType_t;
 
@@ -75,13 +74,37 @@ typedef enum {
 	TriggerIsFalse = TriggerInvert,
 } TriggerType_t;
 
+typedef enum RuleNames {
+// Global
+	SystemError = 0,	// This is the default dependency for all rules
+	TimeOK,
+	Daylight,
+	SunriseTrigger,
+	SunsetTrigger,
+
+// Inputs
+	Shutter1KeyUP,
+	Shutter1KeyDown,
+
+// Shutter 1
+	Shutter1Error,
+	Shutter1NoManualControl,
+	Shutter1DriveTimeout,
+	Shutter1Direction,
+
+// Outputs
+	Shutter1RelayDirection, // needs to be before override Relay!
+	Shutter1RelayOverride,
+} ruleNum_t;
+
 typedef struct {
 	ruleType_t		type;
-	ruleNum_t		dependIndex; // In case of negativ type this is the port on the remote machine
+	ruleNum_t		dependIndex;
+	UDP_Port_t		networkPort;	// For normal rules this is the sourcePort of data packets. For remote rules this is the destination Port.
 	union {
 		IP_Address_t	IP;
 		struct {
-			uint8_t	wdays;
+			uint8_t	wdays;		// Something like (_BV(SUNDAY) | _BV(SATURDAY))
 			unsigned starthour : 6;
 			unsigned startmin  : 6;
 			unsigned stophour  : 6;
@@ -89,15 +112,15 @@ typedef struct {
 		} ATTR_PACKED time;
 		struct {
 			TriggerType_t type;
-			uint8_t	hour;
+			uint8_t	hour;		// If you provide a time, this acts like a monoflop
 			uint8_t	min;
 			uint8_t	sec;
 		} ATTR_PACKED trigger;
 		struct {
+			LogicType_t type;
 			ruleNum_t second;	// Zero means no argument
 			ruleNum_t third;
 			ruleNum_t fourth;
-			LogicType_t type;
 		} ATTR_PACKED logic;
 		struct {
 			HWADDR port;		// Something like &PORTC
@@ -113,17 +136,26 @@ typedef struct {
 #define timerOff UINT32_MAX
 
 static const __flash ruleData_t ruleData[] = {
-	[0] = {.type = ptSNTP, .dependIndex = 123, .data.IP = CPU_TO_BE32(0xC0A8C801)},
-	[1] = {.type = ptTimeSwitch, .dependIndex = 0, .data.time = {.wdays = 0b01111111, .starthour = 12, .startmin = 0, .stophour = 13, .stopmin = 0}},	// Should be ptNight
-	[2] = {.type = ptTrigger, .dependIndex = 1, .data.trigger = {.type = TriggerRising}},
-	[3] = {.type = ptTrigger, .dependIndex = 1, .data.trigger = {.type = TriggerFalling}},
-	[4] = {.type = ptLogic, .dependIndex = 4, .data.logic = {.type = LogicForceOff }},		// Should be ptInput
-	[5] = {.type = ptLogic, .dependIndex = 5, .data.logic = {.type = LogicForceOff }},		// Should be ptInput
-	[6] = {.type = ptLogic, .dependIndex = 2, .data.logic = {.second = 3, .third = 4, .fourth = 5, .type = LogicORAB ^ LogicINV_C ^ LogicINV_D ^ LogicANDCD ^ LogicANDQ12}}, // (A v B) ^ (/C ^ /D)
-	[7] = {.type = ptTrigger, .dependIndex = 6, .data.trigger = {.type = TriggerRising, .min = 2 }},
-	[8] = {.type = ptLogic, .dependIndex = 1, .data.logic = {.second = 7, .type = LogicANDAB}},
-	[9] = {.type = ptRelay, .dependIndex = 8, .data.hw = {.port = &PORTC, .bitValue = _BV(4)}},	// K2
-	[10] = {.type = ptRelay, .dependIndex = 7, .data.hw = {.port = &PORTC, .bitValue = _BV(5)}},	// K1
+// Global rules
+	[SystemError]		= {.type = ptLogic, .data.logic = {.type = LogicForceOff }, .networkPort = 0},		// Should be ptSystemError
+	[TimeOK]		= {.type = ptSNTP, .data.IP = CPU_TO_BE32(0xC0A8C803), .networkPort = 123},
+	[Daylight]		= {.type = ptTimeSwitch, .dependIndex = TimeOK, .data.time = {.wdays = 0b01111111, .starthour = 12, .startmin = 0, .stophour = 13, .stopmin = 0}},	// Should be ptDaylight
+	[SunriseTrigger]	= {.type = ptTrigger, .dependIndex = Daylight, .data.trigger = {.type = TriggerRising}},
+	[SunsetTrigger]		= {.type = ptTrigger, .dependIndex = Daylight, .data.trigger = {.type = TriggerFalling}},
+
+// Inputs
+	[Shutter1KeyUP]		= {.type = ptLogic, .data.logic = {.type = LogicForceOff }},		// Should be ptInput
+	[Shutter1KeyDown]	= {.type = ptLogic, .data.logic = {.type = LogicForceOff }},		// Should be ptInput
+
+// Shutter 1
+	[Shutter1Error]		= {.type = ptLogic, .dependIndex = Shutter1KeyUP, .data.logic = {.second = Shutter1KeyDown, .third = SunriseTrigger, .fourth = SunsetTrigger, .type = LogicANDAB ^ LogicANDCD ^ LogicORQ12}}, // (A ^ B) v (C ^ D)
+	[Shutter1NoManualControl] = {.type = ptLogic, .dependIndex = Shutter1KeyUP, .data.logic = {.second = Shutter1KeyDown, .third = SunriseTrigger, .fourth = SunsetTrigger, .type = LogicINV_A ^ LogicINV_B ^ LogicANDAB ^ LogicORCD ^ LogicANDQ12}}, // (/A ^ /B) ^ (C v D)
+	[Shutter1DriveTimeout]	= {.type = ptTrigger, .dependIndex = Shutter1NoManualControl, .data.trigger = {.type = TriggerRising, .min = 2 }},
+	[Shutter1Direction]	= {.type = ptLogic, .dependIndex = Daylight, .data.logic = {.second = Shutter1DriveTimeout, .type = LogicANDAB}},
+
+// Outputs
+	[Shutter1RelayDirection]= {.type = ptRelay, .dependIndex = Shutter1Direction, .data.hw = {.port = &PORTC, .bitValue = _BV(4)}},		// K2
+	[Shutter1RelayOverride]	= {.type = ptRelay, .dependIndex = Shutter1DriveTimeout, .data.hw = {.port = &PORTC, .bitValue = _BV(5)}},	// K1
 };
 
 static ruleState_t ruleState[ARRAY_SIZE(ruleData)] = {{0}};
@@ -171,16 +203,16 @@ static time_t getMidnight(struct tm *tm ATTR_MAYBE_UNUSED)
 	return _nextMidnight;
 }
 
-ATTR_PURE static bool checkDependency(ruleNum_t dependIndex, ruleNum_t noDependIndex, bool *value, bool *changed)
+static bool checkDependency(ruleNum_t dependIndex, ruleNum_t noDependIndex, bool *value, bool *changed)
 {
-	if(dependIndex == noDependIndex)
+	if(!dependIndex)
 		return false;
 
 	ruleValue_t dependency = ruleState[dependIndex].value;
 	if(dependency == pvUnknown)
 		return true;
 
-	if(dependency < pvUnknown)
+	if(dependency < 0)
 	{
 		*changed = true;
 		dependency = -dependency;
@@ -200,7 +232,7 @@ void checkRules(void)
 		bool dependChanged = false;
 
 		// Check if dependency is in state unknown, otherwise set ruleValue to dependencyValue
-		if(ruleData[rule].type >= 0 && checkDependency(ruleData[rule].dependIndex, rule, &ruleValue, &dependChanged))
+		if(checkDependency(ruleData[rule].dependIndex, rule, &ruleValue, &dependChanged))
 			continue;
 
 		// For ptLogic type we need to check more dependencies for unknown and changed values.
@@ -257,6 +289,7 @@ void checkRules(void)
 					ruleValue = Q1 ^ Q2;
 				else
 					ruleValue = Q1 | Q2;
+
 				if((logictype & LogicINV_Q) == LogicINV_Q)
 					ruleValue = !ruleValue;
 				break;
@@ -266,6 +299,7 @@ void checkRules(void)
 					*ruleData[rule].data.hw.port |= ruleData[rule].data.hw.bitValue;
 				else
 					*ruleData[rule].data.hw.port &= ~ruleData[rule].data.hw.bitValue;
+				// Force a delay between each switching relay
 				_delay_ms(50);
 				break;
 
@@ -308,7 +342,7 @@ void checkRules(void)
 					}
 				}
 				else if(now < ruleState[rule].timer)
-				{
+				{	// Stay on even if dependency switched off
 					ruleValue = true;
 				} else {
 					ruleValue = false;
