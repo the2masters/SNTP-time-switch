@@ -17,6 +17,7 @@ int main(void)
 	wdt_enable(WDTO_2S);
 	set_sleep_mode(SLEEP_MODE_IDLE);
 
+//TODO: Irgendwo muss DDR gesetzt werden, hier ists eher nicht so cool
 	DDRC |= (_BV(4) | _BV(5));
 
 	GlobalInterruptEnable();

@@ -4,6 +4,7 @@
 #include "rules.h"
 #include "resources.h"
 #include "helper.h"
+#include "timestamp.h"
 #include "USB.h"
 #include "Lib/Ethernet.h"
 #include "Lib/SNTP.h"
@@ -11,6 +12,7 @@
 
 typedef int8_t ruleValue_t;
 #define rvUnknown ((ruleValue_t)-128)
+typedef uint8_t ruleNum_t;
 
 typedef enum {
 	ptLogic,
@@ -61,29 +63,6 @@ typedef enum {
 	TriggerBoth = TriggerRising | TriggerFalling,
 } TriggerType_t;
 
-typedef enum RuleNames {
-// Global
-	SystemError = 0,	// This is the default dependency for all rules
-	TimeOK,
-	Daylight,
-	SunriseTrigger,
-	SunsetTrigger,
-
-// Inputs
-	Shutter1KeyUP,
-	Shutter1KeyDown,
-
-// Shutter 1
-	Shutter1Error,
-	Shutter1NoManualControl,
-	Shutter1DriveTimeout,
-	Shutter1Direction,
-
-// Outputs
-	Shutter1RelayDirection, // needs to be before override Relay!
-	Shutter1RelayOverride,
-} ruleNum_t;
-
 typedef struct {
 	ruleType_t		type;
 	ruleNum_t		dependIndex;
@@ -116,6 +95,7 @@ typedef struct {
 		} ATTR_PACKED hw;
 	} data;
 } ruleData_t;
+_Static_assert(sizeof(((ruleData_t *)0)->data) == 4, "data field grew over 4 bytes");
 
 typedef struct {
 	time_t		timer;
@@ -123,73 +103,9 @@ typedef struct {
 } ruleState_t;
 #define timerOff UINT32_MAX
 
-static const __flash ruleData_t ruleData[] = {
-// Global rules
-	[SystemError]		= {.type = ptLogic, .data.logic = {.type = LogicForceOff }, .networkPort = 0},		// Should be ptSystemError
-	[TimeOK]		= {.type = ptSNTP, .data.IP = CPU_TO_BE32(0xC0A8C803), .networkPort = 123},
-	[Daylight]		= {.type = ptTimeSwitch, .dependIndex = TimeOK, .data.time = {.wdays = 0b01111111, .starthour = 0, .startmin = 9, .stophour = 0, .stopmin = 10}},	// Should be ptDaylight
-	[SunriseTrigger]	= {.type = ptTrigger, .dependIndex = Daylight, .data.trigger = {.type = TriggerRising, .sec = 3}},
-	[SunsetTrigger]		= {.type = ptTrigger, .dependIndex = Daylight, .data.trigger = {.type = TriggerFalling, .sec = 4}},
-
-// Inputs
-	[Shutter1KeyUP]		= {.type = ptLogic, .data.logic = {.type = LogicForceOff }},		// Should be ptInput
-	[Shutter1KeyDown]	= {.type = ptLogic, .data.logic = {.type = LogicForceOff }},		// Should be ptInput
-
-// Shutter 1
-	[Shutter1Error]		= {.type = ptLogic, .dependIndex = Shutter1KeyUP, .data.logic = {.second = Shutter1KeyDown, .third = SunriseTrigger, .fourth = SunsetTrigger, .type = LogicANDAB ^ LogicANDCD ^ LogicORQ12}}, // (A ^ B) v (C ^ D)
-	[Shutter1NoManualControl] = {.type = ptLogic, .dependIndex = Shutter1KeyUP, .data.logic = {.second = Shutter1KeyDown, .third = SunriseTrigger, .fourth = SunsetTrigger, .type = LogicINV_A ^ LogicINV_B ^ LogicANDAB ^ LogicORCD ^ LogicANDQ12}}, // (/A ^ /B) ^ (C v D)
-	[Shutter1DriveTimeout]	= {.type = ptTrigger, .dependIndex = Shutter1NoManualControl, .data.trigger = {.type = TriggerRising, .min = 1 }},
-	[Shutter1Direction]	= {.type = ptLogic, .dependIndex = Daylight, .data.logic = {.second = Shutter1DriveTimeout, .type = LogicANDAB}},
-
-// Outputs
-	[Shutter1RelayDirection]= {.type = ptRelay, .dependIndex = Shutter1Direction, .data.hw = {.port = &PORTC, .bitValue = _BV(4)}},		// K2
-	[Shutter1RelayOverride]	= {.type = ptRelay, .dependIndex = Shutter1DriveTimeout, .data.hw = {.port = &PORTC, .bitValue = _BV(5)}},	// K1
-};
+#include STRINGIFY_EXPANDED(CONFIG)
 
 static ruleState_t ruleState[] = {[0 ... ARRAY_SIZE(ruleData)-1] = {.timer = 5, .value = rvUnknown}};
-
-_Static_assert(sizeof(ruleData->data) == 4, "data field grew over 4 bytes");
-
-static time_t calculateTimestamp(struct tm *time, int8_t hour, int8_t min)
-{
-	time->tm_hour = hour, time->tm_min = min; // tm_sec already 0
-
-	// Following is mktime without changing it's arguments but recalculate dst each time
-	// time->tm_isdst = -1; return mktime(time);
-
-	// extract internals out of time.h implementation
-	extern int32_t __utc_offset;
-	extern int16_t (*__dst_ptr)(const time_t *, int32_t *);
-
-	// Convert localtime as UTC and correct it by UTC offset
-	time_t retVal = mk_gmtime(time) - __utc_offset;
-	// Additionally correct time by DST offset (if DST rules are configured)
-	// Orders scheduled in the lost hour in spring are executed one hour early
-	// Orders scheduled in the repeated hour in autumn are executed only one time
-	// after the time shift
-	if(__dst_ptr)
-		return retVal - __dst_ptr(&retVal, &__utc_offset);
-	else
-		return retVal;
-}
-static time_t _nextMidnight = 0;
-static struct tm *getStructTM(time_t now)
-{
-	static struct tm tm = {0};
-	if(now >= _nextMidnight)
-	{
-		localtime_r(&now, &tm);
-		tm.tm_sec = 0;	// ignore seconds
-
-		_nextMidnight = calculateTimestamp(&tm, 24, 0);
-	}
-	return &tm;
-}
-// Parameter to force usage only after getStructTM
-static time_t getMidnight(struct tm *tm ATTR_MAYBE_UNUSED)
-{
-	return _nextMidnight;
-}
 
 static bool checkDependency(ruleNum_t dependIndex, ruleValue_t *value, bool *changed)
 {
@@ -283,6 +199,7 @@ void checkRules(void)
 
 			case ptRelay:
 			{
+//TODO: Irgendwo muss DDR auch gesetzt werden
 				if(ruleValue)
 					*ruleData[rule].data.hw.port |= ruleData[rule].data.hw.bitValue;
 				else
@@ -497,7 +414,7 @@ void UDP_Callback_Reply(uint8_t packet[], const IP_Address_t *sourceIP, UDP_Port
 		{
 			ruleState[rule].value = ~newState;
 		}
-		// Dont check this packet against later rules
+		// Don't check this packet against later rules
 		break;
 	}
 }

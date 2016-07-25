@@ -70,14 +70,13 @@ __attribute__((destructor)) static void timer1_stop(void)
 
 
 #ifdef TIMER1_USE_ICR
-ISR(TIMER1_CAPT_vect, ISR_NAKED)
+ISR(TIMER1_CAPT_vect)
 #else
-ISR(TIMER1_COMPA_vect, ISR_NAKED)
+ISR(TIMER1_COMPA_vect)
 #endif
 {
 	sleep_disable();
 	system_tick();
-	reti();
 }
 
 #ifdef __cplusplus

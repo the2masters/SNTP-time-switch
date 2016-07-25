@@ -56,10 +56,10 @@ __attribute__((destructor)) static void timer0_stop(void)
         power_timer1_disable();
 }
 
-ISR(TIMER0_COMPA_vect, ISR_NAKED)
+ISR(TIMER0_COMPA_vect)
 {
+	sleep_disable();
 	system_tick();
-	reti();
 }
 
 #ifdef __cplusplus
