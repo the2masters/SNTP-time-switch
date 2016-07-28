@@ -131,6 +131,8 @@ static bool checkDependency(ruleNum_t dependIndex, bool *changed)
 
 void checkRules(void)
 {
+//TODO: Hack!
+	ruleState[0].ok = ruleOK;
 	time_t now = time(NULL);
 
 	for(ruleNum_t rule = 0; rule < ARRAY_SIZE(ruleData); rule++)
@@ -329,7 +331,10 @@ void checkRules(void)
 
 		// Did the result of our rule change? Then set changeflag
 		if(ruleState[rule].value != ruleValue)
+		{
+			ruleState[rule].value = ruleValue;
 			ruleState[rule].ok = ruleChanged;
+		}
 	}
 }
 
@@ -382,7 +387,7 @@ bool UDP_Callback_Request(uint8_t packet[], UDP_Port_t destinationPort, uint16_t
 {
 	ruleValue_t *packetValue = (ruleValue_t *)packet;
 
-	if(length != sizeof(ruleValue_t) && *packetValue != 0)
+	if(length != sizeof(ruleValue_t) || *packetValue != 0)
 		return false;
 
 	for(ruleNum_t rule = 0; rule < ARRAY_SIZE(ruleData); rule++)
@@ -392,10 +397,10 @@ bool UDP_Callback_Request(uint8_t packet[], UDP_Port_t destinationPort, uint16_t
 		// Now we know the packet is for the current rule
 
 		// Don't send an answer, if value is unknown
-		if(ruleState[destinationPort].ok == ruleUnknown) break;
+		if(ruleState[rule].ok == ruleUnknown) break;
 
-		*packetValue = ruleState[destinationPort].value;
-		ruleState[destinationPort].ok = ruleOK; // If the rule was in state ruleChanged or ruleSendLater, this is now fixed
+		*packetValue = ruleState[rule].value;
+		ruleState[rule].ok = ruleOK; // If the rule was in state ruleChanged or ruleSendLater, this is now fixed
 		return true;
 	}
 	return false;
@@ -427,9 +432,12 @@ void UDP_Callback_Reply(uint8_t packet[], const IP_Address_t *sourceIP, UDP_Port
 			ruleState[rule].timer = timerOff;
 		}
 		if(ruleState[rule].value == ruleValue)
+		{
 			ruleState[rule].ok = ruleOK;
-		else
+		} else {
+			ruleState[rule].value = ruleValue;
 			ruleState[rule].ok = ruleChanged;
+		}
 
 		// Don't check this packet against later rules
 		break;
