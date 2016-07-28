@@ -10,9 +10,15 @@
 #include "Lib/SNTP.h"
 #include "Lib/UDP.h"
 
-typedef int8_t ruleValue_t;
-#define rvUnknown ((ruleValue_t)-128)
+typedef uint32_t ruleValue_t;
 typedef uint8_t ruleNum_t;
+
+typedef enum {
+	ruleUnknown = 0,
+	ruleOK = 1,
+	ruleChanged = 2,
+	ruleSendLater = 3
+} ruleOK_t;
 
 typedef enum {
 	ptLogic,
@@ -26,21 +32,21 @@ typedef enum {
 } ruleType_t;
 
 typedef enum {
-	LogicXOR = _BV(7),
-	LogicINV_Q = _BV(6),
-	LogicINV_Q2 = _BV(5),
-	LogicINV_Q1 = _BV(4),
-	LogicINV_D = _BV(3),
-	LogicINV_C = _BV(2),
-	LogicINV_B = _BV(1),
 	LogicINV_A = _BV(0),
+	LogicINV_B = _BV(1),
+	LogicINV_C = _BV(2),
+	LogicINV_D = _BV(3),
+	LogicINV_Q1 = _BV(4),
+	LogicINV_Q2 = _BV(5),
+	LogicINV_Q = _BV(6),
+	LogicXOR = _BV(7),
 
 	LogicORAB = 0,
 	LogicORCD = 0,
 	LogicORQ12 = 0,
-	LogicANDAB = LogicINV_A ^ LogicINV_B ^ LogicINV_Q1,
-	LogicANDCD = LogicINV_C ^ LogicINV_D ^ LogicINV_Q2,
-	LogicANDQ12 = LogicINV_Q1 ^ LogicINV_Q2 ^ LogicINV_Q,
+	LogicANDAB = LogicORAB ^ LogicINV_A ^ LogicINV_B ^ LogicINV_Q1,
+	LogicANDCD = LogicORCD ^ LogicINV_C ^ LogicINV_D ^ LogicINV_Q2,
+	LogicANDQ12 = LogicORQ12 ^ LogicINV_Q1 ^ LogicINV_Q2 ^ LogicINV_Q,
 	// Helper for 4 inputs
 	LogicORABCD = LogicORAB ^ LogicORCD ^ LogicORQ12,
 	LogicANDABCD = LogicANDAB ^ LogicANDCD ^ LogicANDQ12,
@@ -56,6 +62,14 @@ typedef enum {
 } LogicType_t;
 
 typedef enum {
+	MathAddition = _BV(0),
+	MathSubtraction = _BV(1),
+	MathMultiplication = _BV(2),
+	MathDivision = _BV(3),
+	MathSet = _BV(7),
+} MathType_t;
+
+typedef enum {
 	TriggerRising = _BV(0),
 	TriggerFalling = _BV(1),
 	TriggerMonoflopRetrigger = _BV(2),
@@ -66,7 +80,7 @@ typedef enum {
 typedef struct {
 	ruleType_t		type;
 	ruleNum_t		dependIndex;
-	UDP_Port_t		networkPort;	// For normal rules this is the sourcePort of data packets. 
+	UDP_Port_t		networkPort;	// For normal rules this is the sourcePort of data packets.
 						// For remote rules this is the destination Port.
 	union {
 		IP_Address_t	IP;
@@ -100,29 +114,18 @@ _Static_assert(sizeof(((ruleData_t *)0)->data) == 4, "data field grew over 4 byt
 typedef struct {
 	time_t		timer;
 	ruleValue_t	value;
+	ruleOK_t	ok;
 } ruleState_t;
 #define timerOff UINT32_MAX
 
 #include STRINGIFY_EXPANDED(CONFIG)
 
-static ruleState_t ruleState[] = {[0 ... ARRAY_SIZE(ruleData)-1] = {.timer = 5, .value = rvUnknown}};
+static ruleState_t ruleState[] = {[0 ... ARRAY_SIZE(ruleData)-1] = {.timer = 5}};
 
-static bool checkDependency(ruleNum_t dependIndex, ruleValue_t *value, bool *changed)
+static bool checkDependency(ruleNum_t dependIndex, bool *changed)
 {
-	if(!dependIndex)
-		return false;
-
-	ruleValue_t dependency = ruleState[dependIndex].value;
-	if(dependency == rvUnknown)
-		return true;
-
-	if(dependency < 0)
-	{
-		*changed = true;
-		dependency = ~dependency;
-	}
-	*value = dependency;
-
+	if(ruleState[dependIndex].ok == ruleUnknown) return true;
+	if(ruleState[dependIndex].ok == ruleChanged) *changed = true;
 	return false;
 }
 
@@ -132,48 +135,58 @@ void checkRules(void)
 
 	for(ruleNum_t rule = 0; rule < ARRAY_SIZE(ruleData); rule++)
 	{
-		ruleValue_t ruleValue = false;
 		bool dependChanged = false;
 
-		// Check if dependency is in state unknown, otherwise set ruleValue to dependencyValue
-		if(checkDependency(ruleData[rule].dependIndex, &ruleValue, &dependChanged))
+		// Check if dependency is in state unknown or changed its value
+		if(checkDependency(ruleData[rule].dependIndex, &dependChanged))
+ 		{
+			// If the dependency is unknown, we can't proceed
+			ruleState[rule].ok = ruleUnknown;
 			continue;
-
-		// For ptLogic type we need to check more dependencies for unknown and changed values.
-		ruleValue_t dependValueB = false, dependValueC = false, dependValueD = false;
-		if(ruleData[rule].type == ptLogic)
-		{
-			if(checkDependency(ruleData[rule].data.logic.second, &dependValueB, &dependChanged))
-				continue;
-
-			if(checkDependency(ruleData[rule].data.logic.third, &dependValueC, &dependChanged))
-				continue;
-
-			if(checkDependency(ruleData[rule].data.logic.fourth, &dependValueD, &dependChanged))
-				continue;
 		}
 
+		// For ptLogic type we need to check more dependencies for unknown and changed values.
+		if(ruleData[rule].type == ptLogic)
+		{
+			if(checkDependency(ruleData[rule].data.logic.second, &dependChanged) ||
+			   checkDependency(ruleData[rule].data.logic.third, &dependChanged) ||
+			   checkDependency(ruleData[rule].data.logic.fourth, &dependChanged))
+			{
+				// If a dependency is unknown, we can't proceed
+				ruleState[rule].ok = ruleUnknown;
+				continue;
+	                }
+		}
 
 		// If we depend on a rule which didn't change in this run and our timer has not expired, skip this rule
 		if(!dependChanged && now < ruleState[rule].timer)
 			continue;
+
+		// Start with the dependency rule value as resulting rule value
+		ruleValue_t ruleValue = ruleState[ruleData[rule].dependIndex].value;
+		// Reset State of this rule, but keep Flag ruleSendLater
+		if(ruleState[rule].ok != ruleSendLater)
+			ruleState[rule].ok = ruleOK;
 
 		switch(ruleData[rule].type)
 		{
 			case ptLogic:
 			{
 				LogicType_t logictype = ruleData[rule].data.logic.type;
+				ruleValue_t dependValueB = ruleState[ruleData[rule].data.logic.second].value;
+				ruleValue_t dependValueC = ruleState[ruleData[rule].data.logic.third].value;
+				ruleValue_t dependValueD = ruleState[ruleData[rule].data.logic.fourth].value;
 
 				if((logictype & LogicINV_A) == LogicINV_A)
-					ruleValue = !ruleValue;
+					ruleValue = ~ruleValue;
 				if((logictype & LogicINV_B) == LogicINV_B)
-					dependValueB = !dependValueB;
+					dependValueB = ~dependValueB;
 				if((logictype & LogicINV_C) == LogicINV_C)
-					dependValueC = !dependValueC;
+					dependValueC = ~dependValueC;
 				if((logictype & LogicINV_D) == LogicINV_D)
-					dependValueD = !dependValueD;
+					dependValueD = ~dependValueD;
 
-				bool Q1, Q2;
+				ruleValue_t Q1, Q2;
 				if((logictype & LogicXOR) == LogicXOR)
 				{
 					Q1 = ruleValue ^ dependValueB;
@@ -183,16 +196,16 @@ void checkRules(void)
 					Q2 = dependValueC | dependValueD;
 				}
 				if((logictype & LogicINV_Q1) == LogicINV_Q1)
-					Q1 = !Q1;
+					Q1 = ~Q1;
 				if((logictype & LogicINV_Q2) == LogicINV_Q2)
-					Q2 = !Q2;
+					Q2 = ~Q2;
 				if((logictype & LogicXOR) == LogicXOR)
 					ruleValue = Q1 ^ Q2;
 				else
 					ruleValue = Q1 | Q2;
 
 				if((logictype & LogicINV_Q) == LogicINV_Q)
-					ruleValue = !ruleValue;
+					ruleValue = ~ruleValue;
 
 				ruleState[rule].timer = timerOff;
 			} break;
@@ -216,7 +229,7 @@ void checkRules(void)
 
 				if((ruleData[rule].data.time.wdays & _BV(tm->tm_wday)) == 0)
 				{
-					ruleValue = false;
+					ruleValue = 0;
 					ruleState[rule].timer = getMidnight(tm);
 					break;
 				}
@@ -224,16 +237,18 @@ void checkRules(void)
 				time_t starttime = calculateTimestamp(tm, ruleData[rule].data.time.starthour, ruleData[rule].data.time.startmin);
 				if(now < starttime)
 				{
-					ruleValue = false;
+					ruleValue = 0;
 					ruleState[rule].timer = starttime;
 				} else {
+					// Optimization: Remove countdown or calculate only one time (not every second)
 	                                time_t stoptime = calculateTimestamp(tm, ruleData[rule].data.time.stophour, ruleData[rule].data.time.stopmin);
 					if(now < stoptime)
 					{
-						ruleValue = true;
-						ruleState[rule].timer = stoptime;
+						ruleValue = stoptime - now;
+					//TODO: Make Update-Interval configurable
+						ruleState[rule].timer = now + 1;
 					} else {
-						ruleValue = false;
+						ruleValue = 0;
 						ruleState[rule].timer = getMidnight(tm);
 					}
 				}
@@ -248,6 +263,7 @@ void checkRules(void)
 					if((((triggertype & TriggerRising) == TriggerRising) && ruleValue) ||
 					   (((triggertype & TriggerFalling) == TriggerFalling) && !ruleValue))
 					{
+						//TODO: Implement countdown?
 						ruleValue = true;
 						ruleState[rule].timer = now + (ruleData[rule].data.trigger.hour * (uint16_t)60 + ruleData[rule].data.trigger.min) * (uint32_t)60 + ruleData[rule].data.trigger.sec;
 					} else {
@@ -278,15 +294,16 @@ void checkRules(void)
 					if(ruleData[rule].type == ptSNTP)
 					{
 						length = SNTP_GenerateRequest(sendPacket.data, &ipCopy, ruleData[rule].networkPort);
-					} else { // ptRemote
+					} else { // ptRemote: Send Packet with empty body
 						length = UDP_GenerateUnicast(sendPacket.data, &ipCopy, ruleData[rule].networkPort, sizeof(ruleValue_t));
 						if(length > 0)
 						{
 							ruleValue_t *packetValue = (ruleValue_t *)(sendPacket.data + length);
-							*packetValue = rvUnknown;
+							*packetValue = 0;
 							length += sizeof(ruleValue_t);
 						}
 					}
+
 					if(length > 0)
 					{
 						sendPacket.len = length;
@@ -297,22 +314,22 @@ void checkRules(void)
 					}
 					USB_Send(sendPacket);
 				}
-				ruleValue = rvUnknown;
+				ruleState[rule].ok = ruleUnknown;
 			} break;
 
 			default:
 			{
-				ruleValue = rvUnknown;
+				ruleState[rule].ok = ruleUnknown;
 				ruleState[rule].timer = timerOff;
 			} break;
 		}
 
-		if(ruleValue == rvUnknown)
+		if(ruleState[rule].ok == ruleUnknown)
 			continue;
 
-		// Did the result of our rule change? Then set changeflag (ones' complement)
+		// Did the result of our rule change? Then set changeflag
 		if(ruleState[rule].value != ruleValue)
-			ruleState[rule].value = ~ruleValue;
+			ruleState[rule].ok = ruleChanged;
 	}
 }
 
@@ -321,7 +338,7 @@ void sendChangedRules(void)
 {
 	for(ruleNum_t rule = 0; rule < ARRAY_SIZE(ruleData); rule++)
 	{
-		if(ruleState[rule].value != rvUnknown && ruleState[rule].value < 0)
+		if(ruleState[rule].ok >= ruleChanged)
 		{
 UDP_Port_t port = ruleData[rule].networkPort ? : rule;
 			if(ruleData[rule].type >= 0 /*&& ruleData[rule].networkPort*/)
@@ -329,18 +346,18 @@ UDP_Port_t port = ruleData[rule].networkPort ? : rule;
 				Packet_t sendPacket;
 				if(USB_isReady() && USB_prepareTS(&sendPacket))
 				{
-					ruleState[rule].value = ~ruleState[rule].value;
-
 					sendPacket.len = UDP_GenerateBroadcast(sendPacket.data, /*ruleData[rule].networkPort*/ port, sizeof(ruleValue_t));
 					ruleValue_t *packetValue = (ruleValue_t *)(sendPacket.data + sendPacket.len);
 					*packetValue = ruleState[rule].value;
 
 					sendPacket.len += sizeof(ruleValue_t);
 					USB_Send(sendPacket);
+
+					ruleState[rule].ok = ruleOK;
 				}
 				// else: could not send packet, try again next round
 			} else {
-				ruleState[rule].value = ~ruleState[rule].value;
+				ruleState[rule].ok = ruleSendLater;
 			}
 		}
 	}
@@ -365,7 +382,7 @@ bool UDP_Callback_Request(uint8_t packet[], UDP_Port_t destinationPort, uint16_t
 {
 	ruleValue_t *packetValue = (ruleValue_t *)packet;
 
-	if(length != sizeof(ruleValue_t) || *packetValue != rvUnknown)
+	if(length != sizeof(ruleValue_t) && *packetValue != 0)
 		return false;
 
 	for(ruleNum_t rule = 0; rule < ARRAY_SIZE(ruleData); rule++)
@@ -374,10 +391,11 @@ bool UDP_Callback_Request(uint8_t packet[], UDP_Port_t destinationPort, uint16_t
 		if(ruleData[rule].networkPort != destinationPort) continue;
 		// Now we know the packet is for the current rule
 
-		// Don't send an answer, if value is changed (will be send later automatically) or is unknown
-		if(ruleState[destinationPort].value < 0) break;
+		// Don't send an answer, if value is unknown
+		if(ruleState[destinationPort].ok == ruleUnknown) break;
 
 		*packetValue = ruleState[destinationPort].value;
+		ruleState[destinationPort].ok = ruleOK; // If the rule was in state ruleChanged or ruleSendLater, this is now fixed
 		return true;
 	}
 	return false;
@@ -393,27 +411,26 @@ void UDP_Callback_Reply(uint8_t packet[], const IP_Address_t *sourceIP, UDP_Port
 		if(ruleData[rule].data.IP != *sourceIP) continue;
 
 		// Now we know the packet is for the current rule
-		ruleValue_t newState;
+		ruleValue_t ruleValue;
 		if(ruleData[rule].type == ptSNTP)
 		{
 			time_t newTime = SNTP_ProcessPacket(packet, length);
 			if(!newTime) break;
 
-			newState = true;
+			ruleValue = (ruleValue_t)newTime;
 			ruleState[rule].timer = newTime + SNTP_TimeBetweenQueries;
 		} else { // ptRemote
-			ruleValue_t *packetValue = (ruleValue_t *)packet;
-
-			if(length != sizeof(ruleValue_t) || *packetValue < 0)
+			if(length != sizeof(ruleValue_t))
 				break;
 
-			newState = *packetValue;
+			ruleValue = *(ruleValue_t *)packet;
 			ruleState[rule].timer = timerOff;
 		}
-		if(ruleState[rule].value != newState)
-		{
-			ruleState[rule].value = ~newState;
-		}
+		if(ruleState[rule].value == ruleValue)
+			ruleState[rule].ok = ruleOK;
+		else
+			ruleState[rule].ok = ruleChanged;
+
 		// Don't check this packet against later rules
 		break;
 	}
