@@ -179,7 +179,7 @@ const USB_Descriptor_Configuration2_t PROGMEM ConfigurationDescriptor2 =
 		},
 };
 
-uint16_t CALLBACK_USB_GetDescriptor(const uint16_t wValue, __attribute__((unused)) const uint8_t wIndex, const void** const DescriptorAddress
+uint16_t CALLBACK_USB_GetDescriptor(const uint16_t wValue, __attribute__((unused)) const uint16_t wIndex, const void** const DescriptorAddress
 //, uint8_t* const DescriptorMemorySpace
 )
 {
