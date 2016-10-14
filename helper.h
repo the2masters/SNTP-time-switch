@@ -6,7 +6,9 @@ extern "C"
 {
 #endif
 
+#undef MIN
 #define MIN(x, y) ({typeof(x) _min1 = (x); typeof(y) _min2 = (y); (void) (&_min1 == &_min2); _min1 < _min2 ? _min1 : _min2; })
+#undef MAX
 #define MAX(x, y) ({typeof(x) _max1 = (x); typeof(y) _max2 = (y); (void) (&_max1 == &_max2); _max1 > _max2 ? _max1 : _max2; })
 
 #define DIV_ROUND_UP(n, d) (((n) + (d) - 1) / (d))
@@ -25,8 +27,26 @@ extern "C"
 #define ARRAY_SIZE(a) (sizeof(a) / sizeof((a)[0]))
 #define ACCESS_ONCE(x) (*(volatile typeof(x) *)&(x))
 
-#define ATOMIC_WRITE ATOMIC_BLOCK(ATOMIC_RESTORESTATE)
+// Force indirect access of pointer, useful only for AVR
+#define FIX_POINTER(_ptr) __asm__ __volatile__("" : "=e" (_ptr) : "0" (_ptr))
 
+// Get a value from a initializer listing
+#define GETBYTE_ARRAY(array, num) ((const uint8_t[]){array}[num])
+// Get high or low byte from a word in big endian
+#define GETBYTE_BE16(value, num) (num ? (uint8_t)BE16_TO_CPU(value) : (uint8_t)(BE16_TO_CPU(value) >> 8))
+
+// Repeat an expression n times
+#define REPEAT1(arg) arg
+#define REPEAT2(arg) do {REPEAT1(arg); REPEAT1(arg);} while(0)
+#define REPEAT3(arg) do {REPEAT2(arg); REPEAT1(arg);} while(0)
+#define REPEAT4(arg) REPEAT2(REPEAT2(arg))
+#define REPEAT6(arg) REPEAT3(REPEAT2(arg))
+#define REPEAT24(arg) REPEAT6(REPEAT4(arg))
+#define REPEAT(n, arg) REPEAT ## n(arg)
+
+
+
+#define ATOMIC_WRITE ATOMIC_BLOCK(ATOMIC_RESTORESTATE)
 #define ATTR_MAYBE_UNUSED __attribute__((unused))
 
 #include <stdint.h>

@@ -5,6 +5,8 @@
 #include <string.h>
 #include <assert.h>
 
+#include <util/atomic.h>
+
 #include "helper.h"
 #include "resources.h"
 
@@ -110,6 +112,7 @@ Packet_t *Buffer_New(uint16_t len)
 		Writer = nextPacket;
 		return packet;
 	}
+	__builtin_unreachable();
 }
 
 /// Extend a packet recently gotten from `Buffer_New()`. This assumes packet is the last packet

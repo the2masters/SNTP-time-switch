@@ -12,8 +12,10 @@
 #define MAC_OWN		0x02, 0x00, 0x00, 0x00, 0x00, 0x40
 #define UDP_PORT	65432
 
-#define ETHERNET_FRAME_SIZE	590
-#define ETHERNET_FRAME_SIZE_MIN	(14+28) // Ethernet ohne CRC: 14 + ARP/IP+UDP/IP+ICMP: 28
+#define PACKET_LEN_MAX	(14+576)
+#define PACKET_LEN_MIN	(14+28) // Ethernet ohne CRC: 14 + ARP/IP+UDP/IP+ICMP: 28
+
+#define PACKETBUFFER_LEN 2048
 
 //TODO: Change to ONE_DAY
 #define SNTP_TimeBetweenQueries 300
