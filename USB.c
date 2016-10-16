@@ -56,6 +56,18 @@ static inline void USB_EnableTransmitter(void)
 	USB_INT_Enable(USB_INT_TXINI);
 }
 
+static inline void error(volatile uint8_t *counter)
+{
+#ifndef NDEBUG
+	uint8_t copy = *counter;
+	if(!++copy) --copy;
+	*counter = copy;
+#endif
+}
+static volatile uint8_t errRXShort = 0;
+static volatile uint8_t errRXIPlong = 0;
+static volatile uint8_t errRXIPdontcare = 0;
+
 void EVENT_USB_Endpoint_Interrupt(void)
 {
 	// Disable all USB endpoint interrupts, then enable global interrupts
@@ -111,89 +123,98 @@ void EVENT_USB_Endpoint_Interrupt(void)
 		}
 
 		// Receive packets into input queue
-		Endpoint_SelectEndpoint(CDC_RX_EPADDR);
-		if(enableRX && Endpoint_IsOUTReceived())
+		if(enableRX && (Endpoint_SelectEndpoint(CDC_RX_EPADDR), Endpoint_IsOUTReceived()))
 		{
 			static Packet_t *packet;
 			static volatile uint8_t *writer;
 			static uint16_t bytesRemaining;
 			static enum {
-				WAITING,
-				NEEDSPACE,
-				READING,
+				WAITING   = 0,
+				NEEDSPACE = 1 << 0,
+				READING   = 1 << 1,
 			} state = WAITING;
 
 #warning: Passe Buffer_Extend an: ueberge, wie viel groesser gemacht werden soll
 #warning: Passe Buffer_Extend an: Funktioniere auch, wenn dazwischen andere Buffer_new aufgerufen wurden
 #warning: Passe Paket an: data als volatile uint8_t[]
+
+			const uint8_t usbLen = Endpoint_BytesInEndpoint();
+
 			if(state == NEEDSPACE)
 			{
 				Packet_t *newPacket = Buffer_Extend(packet, bytesRemaining);
-				if(newPacket == NULL)
+				if(newPacket)
 				{
-					enableRX = false;
-					goto outRX;
-				}
-				writer += (uintptr_t)newPacket - (uintptr_t)packet;
-				packet = newPacket;
-				state = READING;
-			}
-
-			uint8_t usbLen = Endpoint_BytesInEndpoint();
-			bool last = (usbLen != CDC_TXRX_EPSIZE);
-
-			if(state == WAITING && usbLen >= PACKET_LEN_MIN)
-			{
-				packet = Buffer_New(usbLen);
-				if(packet == NULL)
-				{
-					enableRX = false;
-					goto outRX;
-				}
-
-				uint16_t fullLength = USB_Read24Byte_Check_GetLength(packet->data);
-				if(!last && fullLength > usbLen)
-				{
-					Packet_t *newPacket = Buffer_Extend(packet, fullLength - usbLen);
-					if(newPacket == NULL)
-					{
-						state = NEEDSPACE;
-					} else {
-						state = READING;
-						packet = newPacket;
-					}
-					writer = packet->data + 24;
-					bytesRemaining = fullLength - 24;
-				}
-				else if(fullLength > 0)
-				{
+					writer += (uintptr_t)newPacket - (uintptr_t)packet;
+					packet = newPacket;
 					state = READING;
-					writer = packet->data + 24;
-        		                bytesRemaining = usbLen - 24;
 				} else {
-					Buffer_ReleaseInput(packet);
+					enableRX = false;
 				}
 			}
-			if(state > WAITING)
+			else if(state == WAITING)
+			{
+				if(usbLen >= PACKET_LEN_MIN)
+				{
+					packet = Buffer_New(usbLen);
+					if(packet)
+					{
+						state = READING;
+						uint16_t fullLength = USB_Read24Byte_Check_GetLength(packet->data);
+						if(fullLength > usbLen)
+						{
+							if(usbLen == CDC_TXRX_EPSIZE) // There will be more USB frames
+							{
+								Packet_t *newPacket = Buffer_Extend(packet, fullLength - usbLen);
+								if(newPacket)
+								{
+									packet = newPacket;
+								} else { // Try to extend buffer when next frame arrives
+									state |= NEEDSPACE;
+								}
+							} else { // IP Header told us about a larger packet
+								error(&errRXIPlong);
+								fullLength = 0;
+							}
+						}
+
+						if(fullLength > 0)
+						{
+							writer = packet->data + 24;
+							bytesRemaining = fullLength - 24;
+						} else { // Packet is not for us
+							error(&errRXIPdontcare);
+							Buffer_ReleaseInput(packet);
+							packet = NULL;
+							bytesRemaining = 0;
+						}
+					} else { // No space in PacketBuffer
+						enableRX = false;
+					}
+				} else { // usbLen < PACKET_LEN_MIN => cannot be a valid packet
+					error(&errRXShort);
+					Endpoint_ClearOUT();
+				}
+			}
+
+			if(state & READING)
 			{
 				uint8_t readLength = (uint8_t)MIN((uint16_t)usbLen, bytesRemaining);
 				bytesRemaining -= readLength;
 				while(readLength--)
 					*writer++ = Endpoint_Read_8();
 
-				if(last)
+				if(usbLen != CDC_TXRX_EPSIZE)
 				{
-					Buffer_PutInput(packet);
+					if(packet) Buffer_PutInput(packet);
 					state = WAITING;
 					sleep_disable();
 				}
+				Endpoint_ClearOUT();
 			}
-			Endpoint_ClearOUT();
 		}
-		outRX:
 
-		Endpoint_SelectEndpoint(CDC_NOTIFICATION_EPADDR);
-		if(enableNO && Endpoint_IsINReady())
+		if(enableNO && (Endpoint_SelectEndpoint(CDC_NOTIFICATION_EPADDR), Endpoint_IsINReady()))
 		{
 			uint8_t index = --ConnectionStateIndex;
 			if(!index)
@@ -210,13 +231,8 @@ void EVENT_USB_Endpoint_Interrupt(void)
 	}
 
 	if(enableNO) USB_INT_Enable(USB_INT_TXINI);
-
-	Endpoint_SelectEndpoint(CDC_RX_EPADDR);
-	if(enableRX) USB_INT_Enable(USB_INT_RXOUTI);
-
-	Endpoint_SelectEndpoint(CDC_TX_EPADDR);
-	if(enableTX) USB_INT_Enable(USB_INT_TXINI);
-
+	if(enableRX) USB_EnableReceiver();
+	if(enableTX) USB_EnableTransmitter();
 }
 
 __attribute__((constructor)) static void init_USB(void)
