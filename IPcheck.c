@@ -56,7 +56,7 @@ typedef enum
 #define IP_VERSION_IHL          0x45	// TODO: 0x40 | sizeof(IP_HEADER)
 #define IP_FLAGS_DONTFRAGMENT           CPU_TO_BE16(0x4000)
 
-inline uint16_t USB_Read24Byte_Check_GetLength(uint8_t destinationBuffer[])
+inline uint16_t USB_Read24Byte_Check_GetLength(volatile uint8_t destinationBuffer[])
 {
 	uint8_t data;
 	// Read USB Register indirect. Saves about 80 Bytes
