@@ -1,5 +1,6 @@
 #include "PacketBuffer.h"
 
+#include <stddef.h>
 #include <stdint.h>
 #include <stdbool.h>
 #include <string.h>
@@ -23,10 +24,10 @@
 ///   writer to the queue. To ensure this, you have to implement a lock against other writer
 ///   or something similar.
 /// - The length of a packet is stored in the first word of a packet in the queue, the packet data
-///   follows. New packets are aligned to 4 bytes, thus the packet data starts on an uneven word
-///   address (2 byte aligned). This layout is beneficial for storing Ethernet packets, as an
-///   Ethernet header is 14, 18 or 22 bytes long. Therefore the Ethernet payload (e.g. IP-packets)
-///   are aligned to 4 bytes.
+///   follows. New packets are aligned to 4 bytes on machines where uint32 needs to be aligned to
+///   4 bytes. Packet data then starts with offset of 2 bytes. This layout is beneficial for
+///   storing Ethernet packets, as an Ethernet header is 14, 18 or 22 bytes long an following
+///   headers contain uint32 values.
 /// - The length field is also used to store a number of flags and called `state`. You have to use
 ///   `Packet_getLen(packet->state)` to get the length of a packet.
 
@@ -54,6 +55,7 @@
 /// - The last reader position is saved in the LastReader variable. This variable is advanced,
 ///   if the oldest packet is released from the queue.
 
+#define PacketHeaderLen offsetof(Packet_t, data[0])
 _Static_assert(ROUND_UP(PACKETBUFFER_LEN, sizeof(Packet_t)) >=
 		(2 * ROUND_UP(PACKET_LEN_MAX + PacketHeaderLen, sizeof(Packet_t))),
 		 "PACKETBUFFER_LEN needs to be at least twice as large as PACKET_LEN_MAX");
@@ -119,12 +121,17 @@ Packet_t *Buffer_New(uint16_t len)
 /// from Buffer_New() and there are no other concurrent calls from other threads.
 Packet_t *Buffer_Extend(Packet_t *packet, uint16_t newlen)
 {
-	assert((packet->state & Skip) == 0);
-	Packet_t *oldNextPacket = getNextPacket(packet, packet->state);
+	uint16_t oldLen = packet->state;
+	assert((oldLen & Skip) == 0);
+	Packet_t *oldNextPacket = getNextPacket(packet, oldLen);
 
-	// Check if old packet has enough free space in padding
-	uint16_t oldlen = (uint16_t)(((uintptr_t)oldNextPacket - (uintptr_t)packet) - PacketHeaderLen);
-	if(newlen <= oldlen)
+	// there could be unused padding space in packet
+	oldLen = ((oldLen + PacketHeaderLen - 1) | (sizeof(Packet_t) - 1)) - PacketHeaderLen + 1;
+
+	// Alternative:
+	// oldLen = (uint16_t)(((uintptr_t)oldNextPacket - (uintptr_t)packet) - PacketHeaderLen);
+
+	if(newlen <= oldLen)
 	{
 		ATOMIC_WRITE packet->state = newlen;
 		return packet;
@@ -137,13 +144,12 @@ Packet_t *Buffer_Extend(Packet_t *packet, uint16_t newlen)
 	if(append)
 	{	// We have enough space to append the needed bytes to the packet,
 		// just get a new packet for the remaining bytes
-		getlen -= oldlen;
+		getlen -= oldLen;
 
 		// If we enlarge an existing packet we don't need a new header. We can only get
 		// packets with full header from RingBuffer, so subtract header length.
 		if(getlen >= PacketHeaderLen)
 			getlen -= PacketHeaderLen;
-		// Special case: len - old < sizeof(packet_header) => getlen would be negative
 	}
 
 	Packet_t *newPacket = Buffer_New(getlen);

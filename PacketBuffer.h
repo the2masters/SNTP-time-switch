@@ -1,15 +1,16 @@
 #ifndef _PACKETBUFFER_H_
 #define _PACKETBUFFER_H_
 
-#include <stddef.h> // offsetof
+#include <stdalign.h> // alignof
 #include <stdint.h>
 
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wpadded"
 typedef struct {
-	uint16_t state;
-	uint16_t data[1];	// used as flexible array member
-} __attribute__((packed, may_alias)) Packet_t;
-
-#define PacketHeaderLen offsetof(Packet_t, data[0])
+	volatile uint16_t state;
+	volatile uint8_t data[];
+} __attribute__((packed, may_alias, aligned(alignof(uint32_t) == 4 ? 4 : 2))) Packet_t;
+#pragma GCC diagnostic pop
 
 // Create a Buffer
 Packet_t *Buffer_New(uint16_t len);
