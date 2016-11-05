@@ -206,9 +206,16 @@ void EVENT_USB_Endpoint_Interrupt(void)
 
 				if(usbLen != CDC_TXRX_EPSIZE)
 				{
-					if(packet) Buffer_PutInput(packet);
+					if(bytesRemaining)
+					{
+						error(&errRXShort);
+						if(packet) Buffer_ReleaseInput(packet);
+						bytesRemaining = 0;
+					} else {
+						if(packet) Buffer_PutInput(packet);
+						sleep_disable();
+					}
 					state = WAITING;
-					sleep_disable();
 				}
 				Endpoint_ClearOUT();
 			}
