@@ -7,8 +7,8 @@
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wpadded"
 typedef struct {
-	volatile uint16_t state;
-	volatile uint8_t data[];
+	uint16_t state;
+	uint8_t data[];
 } __attribute__((packed, may_alias, aligned(alignof(uint32_t) == 4 ? 4 : 2))) Packet_t;
 #pragma GCC diagnostic pop
 
