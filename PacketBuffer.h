@@ -14,8 +14,8 @@ typedef struct {
 
 // Create a Buffer
 Packet_t *Buffer_New(uint16_t len);
-// Extend a buffer, only possible, if packet == last created buffer
-Packet_t *Buffer_Extend(Packet_t *packet, uint16_t newlen);
+// Resize a buffer
+Packet_t *Buffer_Resize(Packet_t *packet, uint16_t newlen);
 
 // Mark entry ready to be processed
 void Buffer_PutInput(Packet_t *packet);

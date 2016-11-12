@@ -134,8 +134,6 @@ void EVENT_USB_Endpoint_Interrupt(void)
 				READING   = 1 << 1,
 			} state = WAITING;
 
-#warning: Passe Buffer_Extend an: ueberge, wie viel groesser gemacht werden soll
-#warning: Passe Buffer_Extend an: Funktioniere auch, wenn dazwischen andere Buffer_new aufgerufen wurden
 #warning: Passe Paket an: data als volatile uint8_t[]
 
 			const uint8_t usbLen = Endpoint_BytesInEndpoint();
@@ -165,7 +163,7 @@ void EVENT_USB_Endpoint_Interrupt(void)
 						{
 							if(usbLen == CDC_TXRX_EPSIZE) // There will be more USB frames
 							{
-								Packet_t *newPacket = Buffer_Extend(packet, fullLength - usbLen);
+								Packet_t *newPacket = Buffer_Resize(packet, fullLength);
 								if(newPacket)
 								{
 									packet = newPacket;
