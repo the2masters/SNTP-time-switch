@@ -9,7 +9,7 @@
 typedef struct {
 	uint16_t state;
 	uint8_t data[];
-} __attribute__((packed, may_alias, aligned(alignof(uint32_t) == 4 ? 4 : 2))) Packet_t;
+} __attribute__((packed, may_alias, aligned(alignof(uint32_t) > 2 ? alignof(uint32_t) : 2))) Packet_t;
 #pragma GCC diagnostic pop
 
 // Create a Buffer
@@ -29,8 +29,4 @@ Packet_t *Buffer_GetOutput(void);
 void Buffer_ReleaseInput(Packet_t *packet);
 void Buffer_ReleaseOutput(Packet_t *packet);
 
-__attribute__((const)) inline uint16_t Packet_getLen(uint16_t state)
-{
-        return state & 0x3FFF;
-}
 #endif //_PACKETBUFFER_H_
