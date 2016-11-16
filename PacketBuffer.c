@@ -79,70 +79,78 @@ ATTR_ALWAYS_INLINE static inline Packet_t *getNextPacket(Packet_t *packet, uint1
 	return &packet[DIV_ROUND_UP(len + offsetof(Packet_t, data[0]), sizeof(Packet_t))];
 }
 
-ATTR_ALWAYS_INLINE static inline Packet_t *_Buffer_new(Packet_t *writer, Packet_t *lastReader, uint16_t len, bool resize, Packet_t *packet, uint16_t oldLen)
+// TODO: Document me
+ATTR_ALWAYS_INLINE static inline Packet_t *_buffer_new(Packet_t *writer, Packet_t *lastReader, uint16_t len, bool resize, Packet_t *packet, uint16_t oldLen)
 {
-		Packet_t *nextPacket = getNextPacket(writer, len);
+	Packet_t *nextPacket = getNextPacket(writer, len);
 
-		// Check if we have to jump to the beginning of the RingBuffer
-		if(writer >= lastReader)
+	// Check if we can and have to jump to the beginning of the RingBuffer
+	if(writer >= lastReader)
+	{
+		if(nextPacket > RingBuffer.End)
 		{
-			if(nextPacket > RingBuffer.End)
+			nextPacket = getNextPacket(RingBuffer.Start, len);
+
+			// If RingBuffer is empty reset all readers and start from the beginning
+			if(writer == lastReader)
 			{
-				nextPacket = getNextPacket(RingBuffer.Start, len);
-
-				// Test if RingBuffer is empty, reset all reader in this case
-				if(writer == lastReader)
-				{
-					assert(nextPacket <= RingBuffer.End);
-					InputReader = RingBuffer.Start;
-					OutputReader = RingBuffer.Start;
-				}
-				else if(nextPacket < lastReader)
-				{
-					writer->state = StartOver;
-				} else {
-					return NULL;
-				}
-
-				writer = RingBuffer.Start;
+				assert(nextPacket <= RingBuffer.End);
+				InputReader = RingBuffer.Start;
+				OutputReader = RingBuffer.Start;
 			}
+			// If there is enough space in the beginning of the RingBuffer,
+			// mark current end of RingBuffer with StartOver
+			else if(nextPacket < lastReader)
+			{
+				writer->state = StartOver;
+			} else {
+				return NULL;	// Ringbuffer full
+			}
+
+			writer = RingBuffer.Start;
 		}
-		else if(nextPacket >= lastReader)
-		{
-			return NULL;
-		}
+	}
+	// We are in the beginning of the RingBuffer already, check if there is enough
+	// space before old entries at the end of the RingBuffer
+	else if(nextPacket >= lastReader)
+	{
+		return NULL;
+	}
 
-		writer->state = len;
+	writer->state = len;
 
-		if(resize)
-		{
-			packet->state = Skip | oldLen;	// before memmove, as memmove may override memory of old packet (correct)
+	// Next steps are only needed in case of packet resize
+	if(resize)
+	{
+		packet->state = Skip | oldLen;	// before memmove, as memmove may override memory of old packet (correct)
 
-			// Copy old packet into new buffer (underlying memory could overlap)
-			memmove(writer->data, packet->data, oldLen);
-		}
+		// Copy old packet into new buffer (underlying memory could overlap)
+		memmove((void *)writer->data, (void *)packet->data, oldLen);
+	}
 
-		nextPacket->state = EndOfRing;	// after memmove, as this may override memory which is only free after memmove
-		NextWriter = nextPacket;
+	nextPacket->state = EndOfRing;	// after memmove, as this may override memory which is only free after memmove
+	NextWriter = nextPacket;
 
-		return writer;
+	return writer;
+}
+
+/// Get a new packet from RingBuffer (not threadsafe)
+Packet_t *Buffer_New_unsafe(uint16_t len)
+{
+	return _buffer_new(NextWriter, OutputReader, len, false, NULL, 0);
 }
 
 /// Get a new packet from RingBuffer
-Packet_t *Buffer_New(uint16_t len)
+inline Packet_t *Buffer_New(uint16_t len)
 {
 	ATOMIC_BLOCK(ATOMIC_RESTORESTATE)
-	{
-		Packet_t *writer = NextWriter;
-		Packet_t *lastReader = OutputReader;
+		return Buffer_New_unsafe(len);
 
-		return _Buffer_new(writer, lastReader, len, false, NULL, 0);
-	}
 	__builtin_unreachable();
 }
 
-/// Resize a packet recently gotten from `Buffer_New()`.
-Packet_t *Buffer_Resize(Packet_t *packet, uint16_t len)
+/// Resize a packet recently gotten from `Buffer_New()` (not threadsafe)
+Packet_t *Buffer_Resize_unsafe(Packet_t *packet, uint16_t len)
 {
 	uint16_t oldLen = packet->state;
 	assert((oldLen & Skip) == 0);
@@ -150,56 +158,60 @@ Packet_t *Buffer_Resize(Packet_t *packet, uint16_t len)
 	Packet_t *nextPacket = getNextPacket(packet, len);
 	Packet_t *oldNextPacket = getNextPacket(packet, oldLen);
 
-	ATOMIC_BLOCK(ATOMIC_RESTORESTATE)
+	// Packet shrink, need to do something with remainder
+	if(oldNextPacket > nextPacket)
 	{
-		// Packet shrink, need to do something with remainder
-		if(oldNextPacket > nextPacket)
-		{
-			if(NextWriter == oldNextPacket)	// Last element in ring, adjust next write position
-				NextWriter = nextPacket;
-			else				// Otherwise mark remainder as Skip
-				nextPacket->state = Skip | ((uintptr_t)oldNextPacket - (uintptr_t)nextPacket->data);
-		}
-
-		// Packet shrink or same size
-		if(oldNextPacket >= nextPacket)
-		{
-			// even if oldNextPacket == nextPacket it's possible that len != oldLen
-			packet->state = len;
-			return packet;
-		}
-
-		// Packet extend
-		Packet_t *lastReader = OutputReader;
-		Packet_t *writer = NextWriter;
-
-		// Check if packet is last element in RingBuffer and we have enough space to append the extra bytes
-		if(oldNextPacket == writer && ((packet < lastReader) ? (nextPacket < lastReader) : (nextPacket <= RingBuffer.End)))
-		{
-			nextPacket->state = EndOfRing;
-			packet->state = len;
+		if(NextWriter == oldNextPacket)	// Last element in ring, adjust next write position
 			NextWriter = nextPacket;
-			return packet;
-		}
-
-		// We cannot append, create new packet of full length
-		return _Buffer_new(writer, lastReader, len, true, packet, oldLen);
+		else				// Otherwise mark remainder as Skip
+			nextPacket->state = Skip | ((uintptr_t)oldNextPacket - (uintptr_t)nextPacket->data);
 	}
+
+	// Packet shrink or same size
+	if(oldNextPacket >= nextPacket)
+	{
+		// even if oldNextPacket == nextPacket it's possible that len != oldLen
+		packet->state = len;
+		return packet;
+	}
+
+	// Packet extend
+	Packet_t *lastReader = OutputReader;
+	Packet_t *writer = NextWriter;
+
+	// Check if packet is last element in RingBuffer and we have enough space to append the extra bytes
+	if(oldNextPacket == writer && ((packet < lastReader) ? (nextPacket < lastReader) : (nextPacket <= RingBuffer.End)))
+	{
+		nextPacket->state = EndOfRing;
+		packet->state = len;
+		NextWriter = nextPacket;
+		return packet;
+	}
+
+	// We cannot append, create new packet of full length
+	return _buffer_new(writer, lastReader, len, true, packet, oldLen);
+}
+
+/// Resize a packet recently gotten from `Buffer_New()`
+inline Packet_t *Buffer_Resize(Packet_t *packet, uint16_t len)
+{
+	ATOMIC_BLOCK(ATOMIC_FORCEON)
+		return Buffer_Resize_unsafe(packet, len);
+
 	__builtin_unreachable();
 }
 
-void Buffer_PutInput(Packet_t *packet)
+
+inline void Buffer_PutInput(Packet_t *packet)
 {
 	assert((packet->state & Skip) == 0);
-	ATOMIC_BLOCK(ATOMIC_RESTORESTATE)
-		packet->state |= Input;
+	packet->state |= Input;
 }
 
-void Buffer_PutOutput(Packet_t *packet)
+inline void Buffer_PutOutput(Packet_t *packet)
 {
 	assert((packet->state & Skip) == 0);
-	ATOMIC_BLOCK(ATOMIC_RESTORESTATE)
-		packet->state |= Output;
+	packet->state |= Output;
 }
 
 void Buffer_ReattachOutput(Packet_t *packet)
@@ -207,12 +219,12 @@ void Buffer_ReattachOutput(Packet_t *packet)
 	assert((packet->state & Skip) == Input);
 
 	uint16_t len = getLen(packet->state);
+	packet->state = len | Output;
 	Packet_t *nextPacket = getNextPacket(packet, len);
 
-	ATOMIC_BLOCK(ATOMIC_RESTORESTATE)
+	ATOMIC_BLOCK(ATOMIC_FORCEON)
 	{
 		InputReader = nextPacket;
-		packet->state = len | Output;
 	}
 }
 
@@ -220,7 +232,7 @@ void Buffer_ReleaseInput(Packet_t *packet)
 {
 	Packet_t *nextPacket = getNextPacket(packet, getLen(packet->state));
 
-	ATOMIC_BLOCK(ATOMIC_RESTORESTATE)
+	ATOMIC_BLOCK(ATOMIC_FORCEON)
 	{
 		InputReader = nextPacket;
 		if(OutputReader == packet)
@@ -230,63 +242,87 @@ void Buffer_ReleaseInput(Packet_t *packet)
 	}
 }
 
-void Buffer_ReleaseOutput(Packet_t *packet)
+void Buffer_ReleaseOutput_unsafe(Packet_t *packet)
 {
 	Packet_t *nextPacket = getNextPacket(packet, getLen(packet->state));
-	ATOMIC_BLOCK(ATOMIC_RESTORESTATE)
-	{
-		if(InputReader == packet)
-			InputReader = nextPacket;
-		OutputReader = nextPacket;
-	}
+	if(InputReader == packet)
+		InputReader = nextPacket;
+	OutputReader = nextPacket;
 }
 
+inline void Buffer_ReleaseOutput(Packet_t *packet)
+{
+	ATOMIC_BLOCK(ATOMIC_FORCEON)
+		Buffer_ReleaseOutput_unsafe(packet);
+}
 
 Packet_t *Buffer_GetInput(void)
 {
-	Packet_t *reader = InputReader;
-	uint16_t state;
-
-	// Skip entries of type Output or Skip
-	while((state = reader->state) & Output)
+	ATOMIC_BLOCK(ATOMIC_FORCEON)
 	{
-		Packet_t *old = reader;
+		Packet_t *reader = InputReader;
+		bool skipInput = false, skipOutput = (OutputReader == reader);
+		uint16_t state;
 
-		if(state == StartOver)
-			reader = RingBuffer.Start;
-		else
-			reader = getNextPacket(reader, getLen(state));
+		// Skip entries of type Output or Skip
+		while((state = reader->state) & Output)
+		{
+			skipInput = true;
+			// Skip Output pointer entries only for skip entries
+			if(skipOutput && !(state & Input))
+			{
+				OutputReader = reader;
+				skipOutput = false;
+			}
 
-		InputReader = reader;
-		// Advance Output reader, if there's nothing to read for them
-		if((state & Input) && OutputReader == old)	// same as state == Skip or StartOver
-			OutputReader = reader;
+			if(state == StartOver)
+				reader = RingBuffer.Start;
+			else
+				reader = getNextPacket(reader, getLen(state));
+		}
+
+		if(skipInput)
+		{
+			InputReader = reader;
+			if(skipOutput)
+				OutputReader = reader;
+		}
+		return (state & Input) ? reader : NULL;
 	}
-
-	return (state & Input) ? reader : NULL;
+	__builtin_unreachable();
 }
 
-Packet_t *Buffer_GetOutput(void)
+Packet_t *Buffer_GetOutput_unsafe(void)
 {
-	Packet_t *reader = OutputReader;
+	Packet_t *reader = OutputReader, *input = InputReader;
+	bool skipOutput = false, skipInput = false;
 	uint16_t state;
 
 	// Skip entries of type Skip
 	while(((state = reader->state) & Skip) == Skip)
 	{
-		Packet_t *old = reader;
+		skipOutput = true;
+		if(!skipInput && input == reader)
+			skipInput = true;
 
 		if(state == StartOver)
 			reader = RingBuffer.Start;
 		else
 			reader = getNextPacket(reader, getLen(state));
-
-		// Advance InputReader, if there's nothing to read for them
-		if(InputReader == old)
-			InputReader = reader;
-
-		OutputReader = reader;
 	}
 
+	if(skipOutput)
+	{
+		OutputReader = reader;
+		if(skipInput)
+			InputReader = reader;
+	}
 	return (state & Output) ? reader : NULL;
+}
+
+inline Packet_t *Buffer_GetOutput(void)
+{
+	ATOMIC_BLOCK(ATOMIC_FORCEON)
+		return Buffer_GetOutput_unsafe();
+	__builtin_unreachable();
 }
