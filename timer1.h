@@ -6,6 +6,7 @@
 #include <avr/power.h>
 #include <time.h>
 #include <avr/interrupt.h>
+#include <avr/sleep.h>
 
 #ifdef __cplusplus
 extern "C"

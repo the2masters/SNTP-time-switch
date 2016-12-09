@@ -10,12 +10,13 @@
 #define IP_ROUTER	192, 168, 200, 3
 #define IP_SNTP		192, 168, 200, 3
 #define MAC_OWN		0x02, 0x00, 0x00, 0x00, 0x00, 0x40
+#define MAC_BROADCAST	0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF
 #define UDP_PORT	65432
 
-//#define PACKET_LEN_MAX	(14+576)
-//#define PACKET_LEN_MIN	(14+28) // Ethernet ohne CRC: 14 + ARP/IP+UDP/IP+ICMP: 28
-#define PACKET_LEN_MAX 12
-#define PACKET_LEN_MIN 4
+#define PACKET_LEN_MAX	(14+576)
+#define PACKET_LEN_MIN	(14+28) // Ethernet ohne CRC: 14 + ARP/IP+UDP/IP+ICMP: 28
+//#define PACKET_LEN_MAX 12
+//#define PACKET_LEN_MIN 4
 
 #define PACKETBUFFER_LEN PACKET_LEN_MAX
 
@@ -31,12 +32,6 @@ typedef struct
 {
         uint8_t         Octets[6];
 } __attribute__((packed)) MAC_Address_t;
-
-extern const MAC_Address_t OwnMACAddress;
-extern const IP_Address_t OwnIPAddress;
-extern const IP_Address_t BroadcastIPAddress;
-extern const IP_Address_t RouterIPAddress;
-extern const IP_Address_t SNTPIPAddress;
 
 #if CIDR >= 32
 	#error CIDR too large

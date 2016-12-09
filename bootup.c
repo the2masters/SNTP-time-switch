@@ -9,7 +9,7 @@ static void init3(void)
 	wdt_disable();
 
 	/* Disable clock division */
-	clock_prescale_set(clock_div_1);
+	clock_prescale_set(clock_div_2);
 
 	// Disable all peripherals
 	power_all_disable();

@@ -19,11 +19,11 @@ typedef struct
 
 typedef enum
 {
-	ARP_OPERATION_REQUEST	= CPU_TO_BE16(0x0001),
-	ARP_OPERATION_REPLY	= CPU_TO_BE16(0x0002),
+	ARP_OPERATION_REQUEST	= 0x0001,
+	ARP_OPERATION_REPLY	= 0x0002,
 } ARP_Operation_t;
 
-#define ARP_HARDWARE_ETHERNET	CPU_TO_BE16(0x0001)
+#define ARP_HARDWARE_ETHERNET	0x0001
 
 typedef struct
 {
@@ -37,8 +37,8 @@ static uint8_t ARP_WriteHeader(uint8_t packet[], ARP_Operation_t operation, cons
 {
 	ARP_Header_t *ARP = (ARP_Header_t *)packet;
 
-	ARP->HardwareType	= ARP_HARDWARE_ETHERNET;
-	ARP->ProtocolType	= ETHERTYPE_IPV4;
+	ARP->HardwareType	= CPU_TO_BE16(ARP_HARDWARE_ETHERNET);
+	ARP->ProtocolType	= CPU_TO_BE16(ETHERTYPE_IPV4);
 	ARP->HLEN		= sizeof(MAC_Address_t);
 	ARP->PLEN		= sizeof(IP_Address_t);
 	ARP->Operation		= operation;
@@ -51,23 +51,18 @@ static uint8_t ARP_WriteHeader(uint8_t packet[], ARP_Operation_t operation, cons
 
 bool ARP_ProcessPacket(uint8_t packet[], uint16_t length)
 {
-	// Length is already checked
 	ARP_Header_t *ARP = (ARP_Header_t *)packet;
-
-	if(length != sizeof(ARP_Header_t) || ARP->HardwareType != ARP_HARDWARE_ETHERNET || ARP->ProtocolType != ETHERTYPE_IPV4 ||
-	   ARP->HLEN != sizeof(MAC_Address_t) || ARP->PLEN != sizeof(IP_Address_t))
-		return false;
 
 	if(ARP->TargetIP != OwnIPAddress)
 		return false;
 
 	switch(ARP->Operation)
 	{
-		case ARP_OPERATION_REQUEST:
+		case CPU_TO_BE16(ARP_OPERATION_REQUEST):
 			ARP_WriteHeader(packet, ARP_OPERATION_REPLY, &ARP->SenderMAC, &ARP->SenderIP);
 			return true;
 
-		case ARP_OPERATION_REPLY:
+		case CPU_TO_BE16(ARP_OPERATION_REPLY):
 			if(!IP_compareNet(&ARP->SenderIP, &OwnIPAddress))
 				return false;
 
@@ -114,7 +109,7 @@ const MAC_Address_t* ARP_searchMAC(const IP_Address_t *IP)
 
 uint8_t ARP_GenerateRequest(uint8_t packet[], const IP_Address_t *destinationIP)
 {
-	uint8_t offset = Ethernet_GenerateBroadcast(packet, ETHERTYPE_ARP);
+	uint8_t offset = Ethernet_GenerateBroadcast(packet, CPU_TO_BE16(ETHERTYPE_ARP));
 
-	return offset + ARP_WriteHeader(packet + offset, ARP_OPERATION_REQUEST, &BroadcastMACAddress, destinationIP);
+	return offset + ARP_WriteHeader(packet + offset, CPU_TO_BE16(ARP_OPERATION_REQUEST), &BroadcastMACAddress, destinationIP);
 }

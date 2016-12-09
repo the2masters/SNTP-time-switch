@@ -8,36 +8,20 @@ typedef struct
 	MAC_Address_t	Source;
 	uint16_t	EtherType;
 	uint8_t		data[];
-} ATTR_PACKED Ethernet_Header_t;
+}  __attribute__((packed, may_alias)) Ethernet_Header_t;
 
-const MAC_Address_t BroadcastMACAddress = {{0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF}};
-
-__attribute__((pure, always_inline))
-static inline bool MAC_compare(const MAC_Address_t *a, const MAC_Address_t *b)
+bool Ethernet_ProcessPacket(Packet_t *packet)
 {
-	return memcmp(a, b, sizeof(MAC_Address_t)) == 0;
-}
+	Ethernet_Header_t *Ethernet = (Ethernet_Header_t *)packet->data;
 
-bool Ethernet_ProcessPacket(uint8_t packet[], uint16_t length)
-{
-	if(length < ETHERNET_FRAME_SIZE_MIN)
-		return false;
-
-	Ethernet_Header_t *Ethernet = (Ethernet_Header_t *)packet;
-
-	if(!(MAC_compare(&Ethernet->Destination, &OwnMACAddress) ||
-	     MAC_compare(&Ethernet->Destination, &BroadcastMACAddress)))
-		return false;
-
-	length -= sizeof(Ethernet_Header_t);
 	bool reflect;
 	switch (Ethernet->EtherType)
 	{
-		case ETHERTYPE_ARP:
-			reflect = ARP_ProcessPacket(Ethernet->data, length);
+		case CPU_TO_BE16(ETHERTYPE_ARP):
+			reflect = ARP_ProcessPacket((ARP_Header_t *)__builtin_assume_aligned(Ethernet->data, alignof(Packet_t));
 			break;
-		case ETHERTYPE_IPV4:
-			reflect = IP_ProcessPacket(Ethernet->data, length);
+		case CPU_TO_BE16(ETHERTYPE_IPV4):
+			reflect = IP_ProcessPacket((IP_Header_t *)__builtin_assume_aligned(Ethernet->data, alignof(Packet_t));
 			break;
 		default:
 			return false;
@@ -46,7 +30,8 @@ bool Ethernet_ProcessPacket(uint8_t packet[], uint16_t length)
 	if(reflect)
 	{
 		Ethernet->Destination = Ethernet->Source;
-		Ethernet->Source = OwnMACAddress;
+		MAC_Address_t ourMAC = {{MAC_OWN}};
+		Ethernet->Source = ourMAC;
 		return true;
 	} else {
 		return false;

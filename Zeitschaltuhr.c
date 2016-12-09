@@ -1,11 +1,30 @@
-#include <avr/power.h>
-#include <avr/wdt.h>
-#include <avr/sleep.h>
-
 #include "timer1.h"
 #include "resources.h"
 
-#include "rules.h"
+#include <avr/power.h>
+#include <avr/wdt.h>
+#include <avr/sleep.h>
+#include <util/atomic.h>
+
+//#include "rules.h"
+
+#include "PacketBuffer.h"
+#include "USB.h"
+
+void processNetworkPackets(void)
+{
+	Packet_t *packet;
+	ATOMIC_BLOCK(ATOMIC_FORCEON)
+		packet = Packet_GetInput();
+	if(packet) {
+// TODO: if there is one packet, there could be more packets
+		sleep_disable();
+		ATOMIC_BLOCK(ATOMIC_FORCEON) {
+			Packet_ReattachOutput(packet);
+			USB_EnableTransmitter();
+		}
+	}
+}
 
 int main(void)
 {
@@ -14,9 +33,10 @@ int main(void)
 	set_sleep_mode(SLEEP_MODE_IDLE);
 
 //TODO: Irgendwo muss DDR gesetzt werden, hier ists eher nicht so cool
-	DDRC |= (_BV(4) | _BV(5));
+//	DDRC |= (_BV(4) | _BV(5));
+	DDRD = 0xFF;
 
-	GlobalInterruptEnable();
+	sei();
 
 	for (;;)
 	{
@@ -25,9 +45,9 @@ int main(void)
 
 		processNetworkPackets();
 
-		checkRules();
+//		checkRules();
 
-		sendChangedRules();
+//		sendChangedRules();
 
 		sleep_cpu();
 		wdt_reset();

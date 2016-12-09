@@ -93,7 +93,7 @@ const USB_Descriptor_Configuration_t PROGMEM ConfigurationDescriptor =
 
 			.indexMAC               = STRING_ID_MAC,
 			.EthernetStatistics     = 0,
-			.MaxSegmentSize         = ETHERNET_FRAME_SIZE,
+			.MaxSegmentSize         = PACKET_LEN_MAX,
 			.NumberMulticastFilters = 0,
 			.NumberPowerFilters     = 0,
 		},

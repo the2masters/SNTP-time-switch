@@ -3,11 +3,16 @@
 
 #include <LUFA/Drivers/USB/USB.h>
 
-#define CDC_NOTIFICATION_EPADDR        (ENDPOINT_DIR_IN  | 1)
-#define CDC_TX_EPADDR                  (ENDPOINT_DIR_IN  | 3)
-#define CDC_RX_EPADDR                  (ENDPOINT_DIR_OUT | 4)
-#define CDC_NOTIFICATION_EPSIZE        16
-#define CDC_TXRX_EPSIZE                64
+#define CDC_NOTIFICATION_EPADDR		(ENDPOINT_DIR_IN  | 2)
+#define CDC_TX_EPADDR			(ENDPOINT_DIR_IN  | 3)
+#define CDC_RX_EPADDR			(ENDPOINT_DIR_OUT | 4)
+#define CDC_NOTIFICATION_EPSIZE		32
+#define CDC_TXRX_EPSIZE			64
+#ifdef USB_SERIES_2_AVR
+#define CDC_TXRX_BANKS			1
+#else
+#define CDC_TXRX_BANKS			2
+#endif
 
 typedef struct
 {

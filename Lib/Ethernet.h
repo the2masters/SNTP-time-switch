@@ -5,8 +5,8 @@
 
 typedef enum
 {
-	ETHERTYPE_IPV4 = CPU_TO_BE16(0x0800),
-	ETHERTYPE_ARP = CPU_TO_BE16(0x0806)
+	ETHERTYPE_IPV4 = 0x0800,
+	ETHERTYPE_ARP = 0x0806,
 } Ethertype_t;
 
 bool Ethernet_ProcessPacket(uint8_t packet[], uint16_t length) ATTR_WARN_UNUSED_RESULT ATTR_NON_NULL_PTR_ARG(1);

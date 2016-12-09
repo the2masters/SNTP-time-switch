@@ -3,13 +3,13 @@
 #include "ICMP.h"
 #include "Ethernet.h"
 
-#define IP_HEADERLENGTHVERSION		(0x40 | sizeof(IP_Header_t)/4)
+#define IP_VERSION_IHL			(0x40 | sizeof(IP_Header_t)/4)
 #define DEFAULT_TTL			64
-#define IP_FLAGS_DONTFRAGMENT		CPU_TO_BE16(0x4000)
+#define IP_FLAGS_DONTFRAGMENT		0x4000
 
 typedef struct
 {
-	uint8_t		HeaderLengthVersion;
+	uint8_t		Version_IHL;
 	uint8_t		TypeOfService;
 	uint16_t	Length;
 
@@ -57,11 +57,11 @@ static uint8_t IP_WriteHeader(uint8_t packet[], IP_Protocol_t protocol, const IP
 {
 	IP_Header_t *IP = (IP_Header_t *)packet;
 
-	IP->HeaderLengthVersion	= IP_HEADERLENGTHVERSION;
+	IP->Version_IHL		= IP_VERSION_IHL;
 	IP->TypeOfService	= 0;
 	IP->Length		= cpu_to_be16(sizeof(IP_Header_t) + payloadLength);
 	IP->Identification	= 0;
-	IP->FlagsFragment	= IP_FLAGS_DONTFRAGMENT;
+	IP->FlagsFragment	= CPU_TO_BE16(IP_FLAGS_DONTFRAGMENT);
 	IP->TTL			= DEFAULT_TTL;
 	IP->Protocol		= protocol;
 	IP->DestinationAddress	= *destinationIP;	// Can be an alias of IP->SourceAddress
@@ -80,7 +80,7 @@ bool IP_ProcessPacket(uint8_t packet[], uint16_t length)
 	// Remove optional padding
 	uint16_t ip_length = be16_to_cpu(IP->Length);
 
-	if(IP->HeaderLengthVersion != IP_HEADERLENGTHVERSION ||
+	if(IP->Version_IHL != IP_VERSION_IHL ||
 	  (IP->FlagsFragment & CPU_TO_BE16(0x3FFF) ||
 	   ip_length > length))
 		return false;
@@ -117,7 +117,7 @@ int8_t IP_GenerateUnicast(uint8_t packet[], IP_Protocol_t protocol, const IP_Add
 	if(!(IP_compareNet(&OwnIPAddress, destinationIP)))
 		routerIP = &RouterIPAddress;
 
-	int8_t offset = Ethernet_GenerateUnicast(packet, routerIP, ETHERTYPE_IPV4);
+	int8_t offset = Ethernet_GenerateUnicast(packet, routerIP, CPU_TO_BE16(ETHERTYPE_IPV4));
 	if(offset <= 0)
 		return offset;
 
@@ -126,7 +126,7 @@ int8_t IP_GenerateUnicast(uint8_t packet[], IP_Protocol_t protocol, const IP_Add
 
 uint8_t IP_GenerateBroadcast(uint8_t packet[], IP_Protocol_t protocol, uint8_t payloadLength)
 {
-	uint8_t offset = Ethernet_GenerateBroadcast(packet, ETHERTYPE_IPV4);
+	uint8_t offset = Ethernet_GenerateBroadcast(packet, CPU_TO_BE16(ETHERTYPE_IPV4));
 
 	return offset + IP_WriteHeader(packet + offset, protocol, &BroadcastIPAddress, payloadLength);
 }

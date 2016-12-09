@@ -1,14 +1,13 @@
 #include "PacketBuffer.h"
 
-#include <stddef.h>
+#include <stddef.h>	// offsetof
 #include <stdint.h>
 #include <stdbool.h>
-#include <string.h>
+#include <string.h>	// memmove
 #include <assert.h>
-#include <util/atomic.h>
 
-#include "helper.h"
-#include "resources.h"
+#include "helper.h"	// DIV_ROUND_UP
+#include "resources.h"	// PACKETBUFFER_LEN
 
 /// PacketBuffer: Combined queue for variable length packets flowing into two directions.
 /// =====================================================================================
@@ -18,16 +17,15 @@
 /// - Input packets are prioritized over output packets, to allow modifying input packets in place
 ///   and reuse them as output packet. This has a side effect, input packets in the queue block
 ///   reading of output packets located in the ring buffer after the input packets.
-/// - There can be multiple concurrent writer and reader.
-/// - It is possible to resize a packet in the queue.
 /// - Output packets need to be released after being send successfully.
+/// - It is possible to resize a packet in the queue.
 /// - The length of a packet is stored in the first word of a packet in the queue, the packet data
 ///   follows. New packets are aligned to 4 bytes on machines where uint32 needs to be aligned to
 ///   4 bytes. Packet data then starts with offset of 2 bytes. This layout is beneficial for
 ///   storing Ethernet packets, as an Ethernet header is 14, 18 or 22 bytes long and following
 ///   headers contain uint32 values.
 /// - The length field is also used to store a number of flags and called `state`. You have to use
-///   `getLen(packet->state)` to get the length of a packet.
+///   `Packet_getLen(packet->state)` to get the length of a packet.
 
 /// Ring buffer layout:
 /// - As the packets should be stored continuous in memory, we leave unused space in the end of
@@ -40,7 +38,7 @@
 /// - If a new packet is written, the next packet after this new packet is marked as `EndOfRing`.
 ///   Until the new packet is finished, its state is `EndOfRing` | lenght. There can be multiple
 ///   concurrent unfinished packets, the `EndOfRing` flag is cleared, if the packet is finished.
-/// - `Buffer_New()` checks for enough empty space in the RingBuffer. There is always at least
+/// - `Packet_New()` checks for enough empty space in the RingBuffer. There is always at least
 ///   one empty packet between the last reader and the fastest writer. This empty packet is marked
 ///   as `EndOfRing`, see above.
 /// - There is a flag for input and output packets. Input reader skips packet with flag `Output`,
@@ -66,21 +64,22 @@ static Packet_t * volatile NextWriter = RingBuffer.Start;
 static Packet_t * volatile InputReader = RingBuffer.Start;
 static Packet_t * volatile OutputReader = RingBuffer.Start;
 
-
-/// Strip flags from state to get length
-ATTR_ALWAYS_INLINE static inline uint16_t getLen(uint16_t state)
-{
-	return state & ~Skip;
-}
-
 /// Calculate pointer to next packet in memory (without taking bounds into account)
-ATTR_ALWAYS_INLINE static inline Packet_t *getNextPacket(Packet_t *packet, uint16_t len)
+__attribute__((always_inline)) static inline Packet_t *getNextPacket(Packet_t *packet, uint16_t len)
 {
 	return &packet[DIV_ROUND_UP(len + offsetof(Packet_t, data[0]), sizeof(Packet_t))];
 }
 
-// TODO: Document me
-ATTR_ALWAYS_INLINE static inline Packet_t *_buffer_new(Packet_t *writer, Packet_t *lastReader, uint16_t len, bool resize, Packet_t *packet, uint16_t oldLen)
+/// Allocate memory for a new packet in FIFO buffer. This is used by Packet_New and Packet_Resize.
+///
+/// Can optionally copy memory from old packet (used for Packet_Resize), in this case the last 3 parameters are needed.
+/// @param[in] writer Should be NextWriter.
+/// @param[in] lastReader Should be OutputReader
+/// @param[in] len Length of new packet in byte.
+/// @param[in] resize True if memory from `packet` should be copied (Packet_Resize), otherwise false (Packet_New)
+/// @param[in] packet Ignored if `resize`==false, old packet whose memory should be copied to new memory
+/// @param[in] oldLen Ignored if `resize`==false, length of memory to be copied from old packet
+__attribute__((always_inline)) static inline Packet_t *allocateNew(Packet_t *writer, Packet_t *lastReader, uint16_t len, bool resize, Packet_t *packet, uint16_t oldLen)
 {
 	Packet_t *nextPacket = getNextPacket(writer, len);
 
@@ -123,7 +122,6 @@ ATTR_ALWAYS_INLINE static inline Packet_t *_buffer_new(Packet_t *writer, Packet_
 	if(resize)
 	{
 		packet->state = Skip | oldLen;	// before memmove, as memmove may override memory of old packet (correct)
-
 		// Copy old packet into new buffer (underlying memory could overlap)
 		memmove((void *)writer->data, (void *)packet->data, oldLen);
 	}
@@ -134,23 +132,14 @@ ATTR_ALWAYS_INLINE static inline Packet_t *_buffer_new(Packet_t *writer, Packet_
 	return writer;
 }
 
-/// Get a new packet from RingBuffer (not threadsafe)
-Packet_t *Buffer_New_unsafe(uint16_t len)
+/// Allocate memory for a new packet in FIFO buffer.
+Packet_t *Packet_New(uint16_t len)
 {
-	return _buffer_new(NextWriter, OutputReader, len, false, NULL, 0);
+	return allocateNew(NextWriter, OutputReader, len, false, NULL, 0);
 }
 
-/// Get a new packet from RingBuffer
-inline Packet_t *Buffer_New(uint16_t len)
-{
-	ATOMIC_BLOCK(ATOMIC_RESTORESTATE)
-		return Buffer_New_unsafe(len);
-
-	__builtin_unreachable();
-}
-
-/// Resize a packet recently gotten from `Buffer_New()` (not threadsafe)
-Packet_t *Buffer_Resize_unsafe(Packet_t *packet, uint16_t len)
+/// Resize packet in FIFO buffer.
+Packet_t *Packet_Resize(Packet_t *packet, uint16_t len)
 {
 	uint16_t oldLen = packet->state;
 	assert((oldLen & Skip) == 0);
@@ -189,110 +178,58 @@ Packet_t *Buffer_Resize_unsafe(Packet_t *packet, uint16_t len)
 	}
 
 	// We cannot append, create new packet of full length
-	return _buffer_new(writer, lastReader, len, true, packet, oldLen);
+	return allocateNew(writer, lastReader, len, true, packet, oldLen);
 }
 
-/// Resize a packet recently gotten from `Buffer_New()`
-inline Packet_t *Buffer_Resize(Packet_t *packet, uint16_t len)
-{
-	ATOMIC_BLOCK(ATOMIC_FORCEON)
-		return Buffer_Resize_unsafe(packet, len);
-
-	__builtin_unreachable();
-}
-
-
-inline void Buffer_PutInput(Packet_t *packet)
+/// Mark packet ready to be processed by Input chain.
+void Packet_PutInput(Packet_t *packet)
 {
 	assert((packet->state & Skip) == 0);
 	packet->state |= Input;
 }
 
-inline void Buffer_PutOutput(Packet_t *packet)
+/// Mark packet ready to be processed by Output chain.
+void Packet_PutOutput(Packet_t *packet)
 {
 	assert((packet->state & Skip) == 0);
 	packet->state |= Output;
 }
 
-void Buffer_ReattachOutput(Packet_t *packet)
+/// Get a packet from the Input chain. If there is no ready packet, returns NULL.
+Packet_t *Packet_GetInput(void)
 {
-	assert((packet->state & Skip) == Input);
+	Packet_t *reader = InputReader;
+	bool skipInput = false, skipOutput = (OutputReader == reader);
+	uint16_t state;
 
-	uint16_t len = getLen(packet->state);
-	packet->state = len | Output;
-	Packet_t *nextPacket = getNextPacket(packet, len);
-
-	ATOMIC_BLOCK(ATOMIC_FORCEON)
+	// Skip entries of type Output or Skip
+	while((state = reader->state) & Output)
 	{
-		InputReader = nextPacket;
-	}
-}
+		skipInput = true;
+		// Skip Output pointer entries only for skip entries
+		if(skipOutput && !(state & Input))
+		{
+			OutputReader = reader;
+			skipOutput = false;
+		}
 
-void Buffer_ReleaseInput(Packet_t *packet)
-{
-	Packet_t *nextPacket = getNextPacket(packet, getLen(packet->state));
-
-	ATOMIC_BLOCK(ATOMIC_FORCEON)
-	{
-		InputReader = nextPacket;
-		if(OutputReader == packet)
-			OutputReader = nextPacket;
+		if(state == StartOver)
+			reader = RingBuffer.Start;
 		else
-			packet->state |= Skip;
+			reader = getNextPacket(reader, Packet_getLen(state));
 	}
-}
 
-void Buffer_ReleaseOutput_unsafe(Packet_t *packet)
-{
-	Packet_t *nextPacket = getNextPacket(packet, getLen(packet->state));
-	if(InputReader == packet)
-		InputReader = nextPacket;
-	OutputReader = nextPacket;
-}
-
-inline void Buffer_ReleaseOutput(Packet_t *packet)
-{
-	ATOMIC_BLOCK(ATOMIC_FORCEON)
-		Buffer_ReleaseOutput_unsafe(packet);
-}
-
-Packet_t *Buffer_GetInput(void)
-{
-	ATOMIC_BLOCK(ATOMIC_FORCEON)
+	if(skipInput)
 	{
-		Packet_t *reader = InputReader;
-		bool skipInput = false, skipOutput = (OutputReader == reader);
-		uint16_t state;
-
-		// Skip entries of type Output or Skip
-		while((state = reader->state) & Output)
-		{
-			skipInput = true;
-			// Skip Output pointer entries only for skip entries
-			if(skipOutput && !(state & Input))
-			{
-				OutputReader = reader;
-				skipOutput = false;
-			}
-
-			if(state == StartOver)
-				reader = RingBuffer.Start;
-			else
-				reader = getNextPacket(reader, getLen(state));
-		}
-
-		if(skipInput)
-		{
-			InputReader = reader;
-			if(skipOutput)
-				OutputReader = reader;
-		}
-		return (state & Input) ? reader : NULL;
+		InputReader = reader;
+		if(skipOutput)
+			OutputReader = reader;
 	}
-	__builtin_unreachable();
+	return (state & Input) ? reader : NULL;
 }
 
-Packet_t *Buffer_GetOutput_unsafe(void)
+/// Get a packet from the Output chain. If there is no ready packet, returns NULL.
+Packet_t *Packet_GetOutput(void)
 {
 	Packet_t *reader = OutputReader, *input = InputReader;
 	bool skipOutput = false, skipInput = false;
@@ -308,7 +245,7 @@ Packet_t *Buffer_GetOutput_unsafe(void)
 		if(state == StartOver)
 			reader = RingBuffer.Start;
 		else
-			reader = getNextPacket(reader, getLen(state));
+			reader = getNextPacket(reader, Packet_getLen(state));
 	}
 
 	if(skipOutput)
@@ -320,9 +257,33 @@ Packet_t *Buffer_GetOutput_unsafe(void)
 	return (state & Output) ? reader : NULL;
 }
 
-inline Packet_t *Buffer_GetOutput(void)
+/// Release packet from Input chain, free memory.
+void Packet_ReleaseInput(Packet_t *packet)
 {
-	ATOMIC_BLOCK(ATOMIC_FORCEON)
-		return Buffer_GetOutput_unsafe();
-	__builtin_unreachable();
+	Packet_t *nextPacket = getNextPacket(packet, Packet_getLen(packet->state));
+	InputReader = nextPacket;
+	if(OutputReader == packet)
+		OutputReader = nextPacket;
+	else
+		packet->state |= Skip;
 }
+
+/// Release packet from Input chain, free memory.
+void Packet_ReleaseOutput(Packet_t *packet)
+{
+	Packet_t *nextPacket = getNextPacket(packet, Packet_getLen(packet->state));
+	if(InputReader == packet)
+		InputReader = nextPacket;
+	OutputReader = nextPacket;
+}
+
+/// Reattach packet from the Input chain to Output chain.
+void Packet_ReattachOutput(Packet_t *packet)
+{
+	assert((packet->state & Skip) == Input);
+
+	uint16_t len = Packet_getLen(packet->state);
+	packet->state = len | Output;
+	InputReader = getNextPacket(packet, len);
+}
+
