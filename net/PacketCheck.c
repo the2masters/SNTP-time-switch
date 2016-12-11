@@ -1,5 +1,7 @@
 #include "network.h"
 
+uint32_t ip = OwnIPAddress;
+
 inline uint16_t USB_Read24Byte_Check_GetLength(volatile uint8_t destinationBuffer[])
 {
 	uint8_t data;
@@ -45,14 +47,14 @@ inline uint16_t USB_Read24Byte_Check_GetLength(volatile uint8_t destinationBuffe
 	if(data == GETBYTE(0, ETHERTYPE_IPV4))		// IPv4
 	{	// Version_IHL
 		*destinationBuffer++ = data = UEDATX;
-		if((data & 0xF0) != (IP_VERSION_IHL & 0xF0)) return 0;
+		if(data != IP_VERSION_IHL) return 0;	// Only support Packets without options
 
 		// TypOfService
 		*destinationBuffer++ = UEDATX;
 
 		// TotalLength
 		*destinationBuffer++ = data = UEDATX;
-		uint16_t iplength = (uint16_t)data << 8;	// Length is in BE16 format
+		uint16_t iplength = (uint16_t)data << 8;// Length is in BE16 format
 		*destinationBuffer++ = data = UEDATX;
 		iplength += data;
 		iplength += 14;	// TODO: sizeof(Ethernet)
@@ -62,8 +64,8 @@ inline uint16_t USB_Read24Byte_Check_GetLength(volatile uint8_t destinationBuffe
 		REPEAT(2, *destinationBuffer++ = UEDATX);
 
 		// Flags_FragmentOffset
-		*destinationBuffer++ = data = UEDATX;		// Don't support fragmented packets,
-		if(data & ~GETBYTE(1, IP_FLAGS_DONTFRAGMENT)) return 0;			// but allow don't fragment flag
+		*destinationBuffer++ = data = UEDATX;	// Don't support fragmented packets, but allow don't fragment flag
+		if(data & ~GETBYTE(1, IP_FLAGS_DONTFRAGMENT)) return 0;
 		*destinationBuffer++ = data = UEDATX;
 		if(data & ~GETBYTE(0, IP_FLAGS_DONTFRAGMENT)) return 0;
 
@@ -72,7 +74,7 @@ inline uint16_t USB_Read24Byte_Check_GetLength(volatile uint8_t destinationBuffe
 
 		// Protocol
 		*destinationBuffer++ = data = UEDATX;
-		if(data != IP_PROTOCOL_ICMP &&			// Support only ICMP and UDP
+		if(data != IP_PROTOCOL_ICMP &&		// Support only ICMP and UDP
 		   data != IP_PROTOCOL_UDP) return 0;
 		return iplength;
 	}
