@@ -14,7 +14,8 @@
 #include <LUFA/Common/Endianness.h>
 #endif
 
-
+#define inline __attribute__((always_inline)) inline
+#define constexpr __attribute__((always_inline)) constexpr
 
 
 
@@ -53,10 +54,20 @@
 #define INDIRECT(_NAME, ...) _NAME(__VA_ARGS__)
 
 // Count number of arguments to a variadic macro
-#define VA_NARGS_IMPL(_1, _2, _3, _4, _5, _6, _7, _8, _9, N, ...) N
 #define VA_NARGS(...) VA_NARGS_IMPL(__VA_ARGS__, 9, 8, 7, 6, 5, 4, 3, 2, 1)
+#define VA_NARGS_IMPL(_1, _2, _3, _4, _5, _6, _7, _8, _9, N, ...) N
 
-
+// Get Nth parameter from variadic macro argument
+#define VA_ARG_N(N, ...) VA_ARG_ ## N(__VA_ARGS__,)
+#define VA_ARG_0(N, ...) N
+#define VA_ARG_1(_1, N, ...) N
+#define VA_ARG_2(_1, _2, N, ...) N
+#define VA_ARG_3(_1, _2, _3, N, ...) N
+#define VA_ARG_4(_1, _2, _3, _4, N, ...) N
+#define VA_ARG_5(_1, _2, _3, _4, _5, N, ...) N
+#define VA_ARG_6(_1, _2, _3, _4, _5, _6, N, ...) N
+#define VA_ARG_7(_1, _2, _3, _4, _5, _6, _7, N, ...) N
+#define VA_ARG_8(_1, _2, _3, _4, _5, _6, _7, _8, N, ...) N
 
 // Repeat a command n times (like a compile time for loop)
 // Can be called with 2, 3 or 4 arguments
@@ -79,9 +90,8 @@
 #define REPEAT6(arg) do {arg; arg; arg; arg; arg; arg;} while(0)
 #define REPEAT7(arg) do {arg; arg; arg; arg; arg; arg; arg;} while(0)
 #define REPEAT8(arg) do {arg; arg; arg; arg; arg; arg; arg; arg;} while(0)
+#define REPEAT9(arg) do {arg; arg; arg; arg; arg; arg; arg; arg; arg;} while(0)
 #define REPEAT24(arg) do {REPEAT3(REPEAT8(arg));} while(0)
-
-
 
 // Copy all values from a initializer listing into array dest
 #define COPY_ARRAY(length, dest, ...) REPEAT(length, size_t i = 0, dest[i] = GETBYTE_ARRAY(i, __VA_ARGS__), i++)
@@ -89,8 +99,7 @@
 // Get a byte from a bigger value (bytes counted from LSB)
 #define GETBYTE(num, value) ((uint8_t)(value >> (num * 8)))
 // Get a value from a initializer listing
-#define GETBYTE_ARRAY(num, ...) ((const uint8_t[]){__VA_ARGS__}[num])
-
+#define GETBYTE_ARRAY(num, ...) VA_ARG_N(num, __VA_ARGS__)
 
 
 #ifdef __AVR_ARCH__
